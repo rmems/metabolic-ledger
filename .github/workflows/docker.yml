@@ -25,7 +25,7 @@ jobs:
 
       # Docker Hub login removed. It was a demo (per prior request) and is not used.
       # No docker.io images configured in metadata/build-push
-      # (only ghcr.io/limen-neural/metabolic-ledger published on main).
+      # (only ghcr.io/rmems/metabolic-ledger published on main).
       # This prevents spurious auth failures when DOCKER_* secrets are
       # present but invalid (common if using account password instead of
       # PAT, or wrong values).
@@ -52,7 +52,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
-          images: ghcr.io/limen-neural/metabolic-ledger
+          images: ghcr.io/rmems/metabolic-ledger
           tags: |
             type=sha
             type=ref,event=branch
