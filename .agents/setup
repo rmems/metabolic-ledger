@@ -6,7 +6,7 @@
 # be safe to run more than once. See https://ampcode.com/docs/orbs/customizing
 #
 # Installs only what this repo's CI and manifests need:
-#   - apt: build-essential
+#   - apt: build-essential, curl, ca-certificates
 #   - Rust stable (+rustfmt, clippy) [default]
 #   - cargo fetch
 #
@@ -34,8 +34,8 @@ apt_install() {
   fi
 }
 
-# --- System packages (C toolchain/linker for rustc and build scripts) ---
-apt_install build-essential
+# --- System packages (C toolchain/linker for rustc and build scripts; curl for the installers) ---
+apt_install build-essential curl ca-certificates
 
 # --- Rust (rustup) ---
 export PATH="$HOME/.cargo/bin:$PATH"
