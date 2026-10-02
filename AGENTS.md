@@ -5,10 +5,12 @@ Guidance for coding agents (Amp, Codex, Cursor, Claude Code, and others) working
 ## Purpose
 
 `metabolic-ledger` is a Rust library that simulates a multi-asset portfolio without real funds,
-using biological energy concepts (ATP) to constrain position sizing (see `README.md`). Each trade
-signal consumes a fraction of available ATP, with a metabolic cost that models spread/slippage, and
-every decision is logged to JSONL (`GhostTradeLog`) for SNN training data. It owns persistent ghost
-accounting (`GhostWallet`, realized PnL, win rate, Kelly fraction).
+using biological energy concepts (ATP) to constrain position sizing (see `README.md`). A buy spends
+`kelly_fraction()` of the available ATP; a sell sells `kelly_fraction()` of the asset balance and
+adds the proceeds back to ATP. Both deduct a metabolic cost (`METABOLIC_COST`) that models
+spread/slippage (`src/engine.rs`). Executed trades are appended to JSONL (`GhostTradeLog`) for SNN
+training data when a `log_path` is passed; trades below the minimum size return without trading or
+logging. It owns persistent ghost accounting (`GhostWallet`, realized PnL, win rate, Kelly fraction).
 
 ## Layout
 
@@ -25,7 +27,9 @@ accounting (`GhostWallet`, realized PnL, win rate, Kelly fraction).
 - Rust `stable` (CI uses `dtolnay/rust-toolchain` stable with rustfmt, clippy); edition 2024.
 - `Cargo.lock` is gitignored (library crate).
 - Feature `sentry` (off by default). Dev dependency `proptest` for property tests.
-- No GPU or system packages needed.
+- No GPU needed. Default builds need no system packages, but `--all-features` (as in CI) enables
+  `sentry`, whose default `native-tls` transport needs `openssl-sys`: install `pkg-config` and the
+  OpenSSL headers (`libssl-dev` on Debian/Ubuntu) first.
 
 ## Commands (from `.github/workflows/ci.yml`, run on ubuntu, windows and macos)
 
