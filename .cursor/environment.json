@@ -1,0 +1,4 @@
+{
+  "name": "metabolic-ledger",
+  "install": "bash .cursor/install.sh"
+}
