@@ -1,0 +1,56 @@
+{
+  "schema": "metabolic-ledger.parity.v1",
+  "schema_version": 1,
+  "source": "hand-verified",
+  "name": "reject",
+  "units": {
+    "instrument": "ASSET_A",
+    "quote": "USD",
+    "price_scale": 100,
+    "qty_scale": 1
+  },
+  "initial": {
+    "cash_subunits": 100000
+  },
+  "events": [
+    {
+      "kind": "reject",
+      "order_id": "o-reject",
+      "event_time_ns": 9,
+      "instrument": "ASSET_A",
+      "reason": "insufficient_liquidity"
+    }
+  ],
+  "expected": {
+    "cash_subunits": 100000,
+    "inventory_lots": 0,
+    "total_cost_subunits": 0,
+    "realized_pnl_subunits": 0,
+    "fees_subunits": 0,
+    "audit": [
+      {
+        "event_time_ns": 9,
+        "kind": "reject",
+        "fill_id": null,
+        "order_id": "o-reject",
+        "instrument": "ASSET_A",
+        "side": null,
+        "price_ticks": null,
+        "qty_lots": null,
+        "fee_subunits": null,
+        "realized_pnl_delta": 0,
+        "cash_after": 100000,
+        "inventory_after": 0,
+        "total_cost_after": 0,
+        "reason": "insufficient_liquidity",
+        "idempotent_replay": false
+      }
+    ]
+  },
+  "tolerances": {
+    "cash_subunits": 0,
+    "realized_pnl_subunits": 0,
+    "unrealized_pnl_subunits": 0,
+    "fees_subunits": 0
+  }
+}
