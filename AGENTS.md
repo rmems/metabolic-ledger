@@ -49,3 +49,14 @@ cargo test --all-features
 - CI runs on Windows and macOS too, so keep code and tests platform-neutral (paths, line endings).
 - Rust sources carry SPDX license identifier headers.
 - Commit subjects mostly follow Conventional Commits with issue numbers.
+
+## M2 guardrails (paper-only scope)
+
+- Reject unsupported positions with an explicit error; never silently coerce shorts or other
+  unsupported states.
+- Apply fees/rebates and sizing exactly once per fill.
+- Keep units consistent (price, quantity, notional, fees) across fill application, PnL and audit
+  records.
+- Keep ATP-policy state separate from economic accounting and realized PnL.
+- No venue connectivity, no live trading, no model training in this crate.
+- No Kelly-from-raw-confidence sizing.
