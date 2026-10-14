@@ -41,10 +41,11 @@ The product must be divisible by `qty_scale` and must fit in `i64`. Otherwise th
 
 Sign rules:
 
-- Buy: cash decreases by `notional + fee`.
-- Sell: cash increases by `notional - fee`.
+- Buy cash change is `-(notional + fee)`.
+- Sell cash change is `+(notional - fee)`.
 - `fee_subunits > 0` is a commission (paid once).
-- `fee_subunits < 0` is a rebate (credited once).
+- `fee_subunits < 0` is a rebate (credited once). Rebate size is not capped at the notional.
+- A buy rebate larger than the notional makes `notional + fee` negative, so cash **increases** and `total_cost_subunits` can go negative. That is allowed. The fill is rejected only when the integer add or subtract overflows `i64`.
 
 ## Cost basis and realized PnL
 

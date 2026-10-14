@@ -599,6 +599,18 @@ mod tests {
     }
 
     #[test]
+    fn buy_rebate_larger_than_notional_increases_cash() {
+        let mut book = ledger();
+        book.apply_fill(buy("rebate-over", 1, 1000, 10, -15_000))
+            .unwrap();
+        assert_eq!(book.cash_subunits(), 105_000);
+        assert_eq!(book.inventory_lots(), 10);
+        assert_eq!(book.total_cost_subunits(), -5_000);
+        assert_eq!(book.fees_subunits(), -15_000);
+        assert_eq!(book.realized_pnl_subunits(), 0);
+    }
+
+    #[test]
     fn other_instrument_is_rejected() {
         let mut book = ledger();
         let err = book
