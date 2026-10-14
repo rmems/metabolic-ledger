@@ -55,7 +55,15 @@ The book stores `total_cost_subunits` (integer), not a float average.
 - Partial sell: `allocated = trunc(total_cost * sell_qty / inventory)` toward zero; realized = `(notional - fee) - allocated`.
 - Full close: allocated is the **remaining** `total_cost` so no dust is left on a flat book.
 
-`weighted_cost_basis_ticks` is `floor(total_cost / inventory)` when long, else `0`. Fixtures that need exact basis should assert `total_cost_subunits` as well.
+`weighted_cost_basis_ticks` is ticks **per asset unit**, the same unit as `price_ticks`:
+
+```
+floor((total_cost_subunits * qty_scale) / inventory_lots)
+```
+
+when long, else `0`. Floor is Euclidean, so a negative cost from a large buy rebate rounds down. With `qty_scale = 1` this is `floor(total_cost / inventory)`. Fixtures that need an exact basis should assert `total_cost_subunits` as well.
+
+`AtpPolicy::energy_commitment` is the fraction used by `propose_buy_spend` and `propose_sell_qty`. Those helpers do not read the wallet Kelly fraction, and `PaperLedger` does not apply them.
 
 Unrealized / mark-to-market is **not** ledger state. Callers pass an external `mark_price_ticks`:
 
@@ -76,7 +84,7 @@ unrealized = notional(mark, inventory) - total_cost
 
 ## ATP separation
 
-`AtpPolicy` can propose a size from `balance_atp` and a Kelly fraction. `PaperLedger::apply_fill` takes the accepted quantity as given and has no `GhostWallet` / ATP field. Changing ATP after a fill cannot change committed realized PnL.
+`AtpPolicy::propose_buy_spend` and `propose_sell_qty` size from `energy_commitment` and the balances the caller passes. `PaperLedger::apply_fill` takes the accepted quantity as given and has no `GhostWallet` / ATP field. Changing ATP or `energy_commitment` after a fill cannot change committed realized PnL.
 
 ## Golden fixtures
 

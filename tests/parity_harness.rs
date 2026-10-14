@@ -101,7 +101,8 @@ fn realized_pnl_never_reads_atp_or_kelly() {
         energy_commitment: 0.99,
         metabolic_cost: 0.5,
     };
-    let _ignored_proposal = policy.propose_buy_spend(wallet.balance_atp, wallet.kelly_fraction());
+    let proposal = policy.propose_buy_spend(wallet.balance_atp);
+    assert!((proposal - 0.99).abs() < 1e-6);
 
     let mut book = PaperLedger::new("ASSET_A", Scale::CENTS_WHOLE_LOTS, 100_000).unwrap();
     book.apply_fill(AcceptedFill {

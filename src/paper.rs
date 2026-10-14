@@ -174,13 +174,24 @@ impl PaperLedger {
         &self.audit
     }
 
-    /// Floor average entry in ticks; `0` when flat. Remainder lives in `total_cost`.
+    /// Floor average entry in ticks per asset unit; `0` when flat.
+    ///
+    /// `total_cost_subunits` is quote subunits for the whole position, and
+    /// `inventory_lots` counts lots. Multiplying by `qty_scale` converts the
+    /// ratio back to the same tick unit as `price_ticks`. Remainder stays in
+    /// `total_cost_subunits`. Division is Euclidean (floor), including when a
+    /// rebate makes the cost negative.
     pub fn weighted_cost_basis_ticks(&self) -> i64 {
         if self.inventory_lots == 0 {
-            0
-        } else {
-            self.total_cost_subunits / self.inventory_lots
+            return 0;
         }
+        let numerator = (self.total_cost_subunits as i128) * (self.scale.qty_scale as i128);
+        let basis = numerator.div_euclid(self.inventory_lots as i128);
+        i64::try_from(basis).unwrap_or(if basis.is_negative() {
+            i64::MIN
+        } else {
+            i64::MAX
+        })
     }
 
     /// Mark-to-market using an **external** mark. Not stored as ledger state.
@@ -596,6 +607,39 @@ mod tests {
         bad.instrument = "OTHER".into();
         assert!(book.apply_fill(bad).is_err());
         assert_eq!(book.snapshot_json(None).unwrap(), before);
+    }
+
+    #[test]
+    fn basis_is_ticks_per_asset_unit_when_qty_scale_exceeds_one() {
+        let mut book = PaperLedger::new(
+            "ASSET_A",
+            Scale {
+                price_scale: 100,
+                qty_scale: 100,
+            },
+            100_000,
+        )
+        .unwrap();
+        book.apply_fill(AcceptedFill {
+            fill_id: "frac".into(),
+            event_time_ns: 1,
+            instrument: "ASSET_A".into(),
+            side: Side::Buy,
+            price_ticks: 1000,
+            qty_lots: 100,
+            fee_subunits: 0,
+        })
+        .unwrap();
+        assert_eq!(book.total_cost_subunits(), 1_000);
+        assert_eq!(book.weighted_cost_basis_ticks(), 1_000);
+    }
+
+    #[test]
+    fn negative_cost_basis_floors() {
+        let mut book = ledger();
+        book.apply_fill(buy("neg", 1, 1, 2, -3)).unwrap();
+        assert_eq!(book.total_cost_subunits(), -1);
+        assert_eq!(book.weighted_cost_basis_ticks(), -1);
     }
 
     #[test]
