@@ -8,8 +8,10 @@
 //!
 //! Supported: one instrument, long or flat inventory (`inventory_lots >= 0`).
 //! Buys open or add. Sells reduce or close and must not exceed holdings.
-//! Anything else — shorts, sells beyond inventory, a second instrument,
-//! derivatives — is a typed [`LedgerError`], never a clamp.
+//! Shorts and sells beyond inventory are [`LedgerError::UnsupportedShort`]. A
+//! second instrument is [`LedgerError::InstrumentMismatch`]. Derivatives cannot
+//! be expressed: [`AcceptedFill`] has no contract, leverage, or funding field.
+//! Nothing is clamped.
 //!
 //! This type does not read ATP, Kelly, or [`crate::policy::AtpPolicy`].
 
@@ -181,16 +183,18 @@ impl PaperLedger {
     /// ratio back to the same tick unit as `price_ticks`. Remainder stays in
     /// `total_cost_subunits`. Division is Euclidean (floor), including when a
     /// rebate makes the cost negative.
-    pub fn weighted_cost_basis_ticks(&self) -> i64 {
+    ///
+    /// The intermediate is computed in `i128`. When the floored result does not
+    /// fit in `i64` this returns [`LedgerError::OutOfRange`]. It never saturates
+    /// or clamps to `i64::MIN` / `i64::MAX`.
+    pub fn checked_weighted_cost_basis_ticks(&self) -> Result<i64, LedgerError> {
         if self.inventory_lots == 0 {
-            return 0;
+            return Ok(0);
         }
         let numerator = (self.total_cost_subunits as i128) * (self.scale.qty_scale as i128);
         let basis = numerator.div_euclid(self.inventory_lots as i128);
-        i64::try_from(basis).unwrap_or(if basis.is_negative() {
-            i64::MIN
-        } else {
-            i64::MAX
+        i64::try_from(basis).map_err(|_| LedgerError::OutOfRange {
+            reason: format!("weighted_cost_basis_ticks {basis} does not fit i64"),
         })
     }
 
@@ -211,6 +215,10 @@ impl PaperLedger {
     }
 
     /// Canonical snapshot. `unrealized_pnl_subunits` is 0 unless `mark` is given.
+    ///
+    /// Fails with [`LedgerError::OutOfRange`] when a derived value (unrealized PnL
+    /// or [`Self::checked_weighted_cost_basis_ticks`]) does not fit in `i64`, so a
+    /// clamped number is never serialized or compared.
     pub fn snapshot(&self, mark_price_ticks: Option<i64>) -> Result<LedgerSnapshot, LedgerError> {
         let unrealized = match mark_price_ticks {
             Some(mark) => self.unrealized_pnl(mark)?,
@@ -223,7 +231,7 @@ impl PaperLedger {
             cash_subunits: self.cash_subunits,
             inventory_lots: self.inventory_lots,
             total_cost_subunits: self.total_cost_subunits,
-            weighted_cost_basis_ticks: self.weighted_cost_basis_ticks(),
+            weighted_cost_basis_ticks: self.checked_weighted_cost_basis_ticks()?,
             realized_pnl_subunits: self.realized_pnl_subunits,
             fees_subunits: self.fees_subunits,
             unrealized_pnl_subunits: unrealized,
@@ -631,7 +639,7 @@ mod tests {
         })
         .unwrap();
         assert_eq!(book.total_cost_subunits(), 1_000);
-        assert_eq!(book.weighted_cost_basis_ticks(), 1_000);
+        assert_eq!(book.checked_weighted_cost_basis_ticks(), Ok(1_000));
     }
 
     #[test]
@@ -639,7 +647,55 @@ mod tests {
         let mut book = ledger();
         book.apply_fill(buy("neg", 1, 1, 2, -3)).unwrap();
         assert_eq!(book.total_cost_subunits(), -1);
-        assert_eq!(book.weighted_cost_basis_ticks(), -1);
+        assert_eq!(book.checked_weighted_cost_basis_ticks(), Ok(-1));
+    }
+
+    /// Book whose cost basis overflows `i64` once multiplied by `qty_scale`.
+    /// `qty_scale = 2`, one lot at 2 ticks (notional 1), and a fee chosen so
+    /// `total_cost * 2` lies outside `i64`. Every individual fill step fits.
+    fn book_with_basis_fee(fee: i64) -> PaperLedger {
+        let mut book = PaperLedger::new(
+            "ASSET_A",
+            Scale {
+                price_scale: 100,
+                qty_scale: 2,
+            },
+            100_000,
+        )
+        .unwrap();
+        book.apply_fill(buy("huge", 1, 2, 1, fee)).unwrap();
+        book
+    }
+
+    #[test]
+    fn cost_basis_above_i64_max_is_out_of_range() {
+        let book = book_with_basis_fee(i64::MAX / 2);
+        assert_eq!(book.total_cost_subunits(), i64::MAX / 2 + 1);
+        let err = book.checked_weighted_cost_basis_ticks().unwrap_err();
+        assert!(matches!(err, LedgerError::OutOfRange { .. }), "{err:?}");
+        let err = book.snapshot(None).unwrap_err();
+        assert!(matches!(err, LedgerError::OutOfRange { .. }), "{err:?}");
+        assert!(book.snapshot_json(None).is_err());
+    }
+
+    #[test]
+    fn cost_basis_below_i64_min_is_out_of_range() {
+        let book = book_with_basis_fee(-(i64::MAX / 2) - 10);
+        assert!(book.total_cost_subunits() < i64::MIN / 2);
+        let err = book.checked_weighted_cost_basis_ticks().unwrap_err();
+        assert!(matches!(err, LedgerError::OutOfRange { .. }), "{err:?}");
+        assert!(matches!(
+            book.snapshot(None),
+            Err(LedgerError::OutOfRange { .. })
+        ));
+    }
+
+    #[test]
+    fn cost_basis_at_i64_boundary_is_exact() {
+        // total_cost * 2 == i64::MAX - 1 fits and is returned unchanged.
+        let book = book_with_basis_fee(i64::MAX / 2 - 1);
+        assert_eq!(book.total_cost_subunits(), i64::MAX / 2);
+        assert_eq!(book.checked_weighted_cost_basis_ticks(), Ok(i64::MAX - 1));
     }
 
     #[test]

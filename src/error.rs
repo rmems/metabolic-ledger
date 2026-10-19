@@ -31,7 +31,13 @@ pub enum LedgerError {
     OutOfRange { reason: String },
     /// Same `fill_id` seen again with a different payload.
     DuplicateFillConflict { fill_id: String },
-    /// Feature outside the declared M2 subset (multi-asset, derivatives, …).
+    /// Reserved for a feature outside the declared M2 subset.
+    ///
+    /// No code path returns this at present. A second instrument is
+    /// [`Self::InstrumentMismatch`], shorts are [`Self::UnsupportedShort`], and
+    /// derivatives cannot be expressed by the current input types. The variant
+    /// and its `unsupported_subset` type name are kept stable for the fixture
+    /// contract so a later schema can use them.
     UnsupportedSubset { reason: String },
 }
 
