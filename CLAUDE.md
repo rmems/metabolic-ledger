@@ -15,13 +15,14 @@ Do not break these. Each one is enforced in code or written in the contract.
    - `PaperLedger` does not import the policy module. `apply_fill` takes the accepted quantity as given and never applies a `propose_buy_spend` / `propose_sell_qty` proposal.
    - `tests/parity_harness.rs::realized_pnl_never_reads_atp_or_kelly` guards this.
    - `METABOLIC_COST` is ATP friction, not an exchange fee.
-3. **Integer units on the paper path.** Prices are `price_ticks: i64`, sizes are `qty_lots: i64`, and money is in quote subunits (`i64`). Scales come from `Scale` in `src/units.rs`. There is no `f32`/`f64` on this path. Fill arithmetic is checked, and overflow is `LedgerError::OutOfRange`. Exception: `PaperLedger::weighted_cost_basis_ticks()` (a derived snapshot value) saturates to `i64::MIN` / `i64::MAX` when the i128 result does not fit in `i64`, instead of returning an error. Do not rely on it at extreme magnitudes. The legacy `execute_*` / `GhostTradeLog` path is `f32` and is **not** the parity path.
+3. **Integer units on the paper path.** Prices are `price_ticks: i64`, sizes are `qty_lots: i64`, and money is in quote subunits (`i64`). Scales come from `Scale` in `src/units.rs`. There is no `f32`/`f64` on this path. Fill arithmetic is checked, and overflow is `LedgerError::OutOfRange`. Derived values are checked too: `PaperLedger::checked_weighted_cost_basis_ticks()` returns `OutOfRange` when the i128 result does not fit in `i64` (no saturation), and `snapshot`, `snapshot_json` and the parity harness propagate that error instead of comparing a clamped number. The legacy `execute_*` / `GhostTradeLog` path is `f32` and is **not** the parity path.
 4. **Fees and rebates are applied exactly once per fill.** `fee_subunits > 0` is a commission and `< 0` is a rebate. Buy fees enter the cost basis.
 5. **Supported subset: one instrument, long or flat.**
    - Overselling, or selling from flat, is `LedgerError::UnsupportedShort`.
    - A second symbol is `LedgerError::InstrumentMismatch`.
-   - `UnsupportedSubset` is declared for other out-of-subset features, but no code path returns it at HEAD.
-   - Fill quantities and positions are never clamped or silently coerced (see invariant 3 for the one saturating derived value).
+   - Derivatives cannot be expressed: `AcceptedFill` has no contract, leverage, margin, expiry or funding field.
+   - `UnsupportedSubset` (`unsupported_subset`) is a reserved type name with no current code path, per the contract. Keep its `type_name()` stable.
+   - Nothing is clamped or silently coerced: not fill quantities, positions, or derived snapshot values.
    - A failed call leaves committed state unchanged. `plan_fill` computes the result, and `commit_fill` mutates state only on success.
 6. **`fill_id` identity.**
    - Same `fill_id` with the same payload returns `ApplyOutcome::IdempotentReplay`. There is no second debit. The ledger appends an audit row with `idempotent_replay = true` and `realized_pnl_delta = 0`.
@@ -33,19 +34,20 @@ Do not break these. Each one is enforced in code or written in the contract.
    - DendriteTrader.jl (RM-1864) is meant to emit the same JSON.
    - `load_fixture` rejects any other schema id or version.
    - Integer tolerances are `0`.
-   - Working rule: do not edit existing v1 fixtures in place to make a test pass. A semantic change belongs in a new schema version and directory. Do not change DendriteTrader.jl from this repo.
+   - Versioning rules are in the contract ("Golden fixtures"): shipped v1 fixture files are immutable; additional v1 files are allowed only if they keep v1 semantics and every existing v1 fixture still passes unchanged; a semantic change needs a new schema version and directory (e.g. `fixtures/v2/`).
+   - Do not change DendriteTrader.jl from this repo.
 
 ## Verified commands
 
-Run at `37f626f` (main) with cargo/rustc 1.97.0 on Linux. These match `.github/workflows/ci.yml` and `azure-pipelines.yml`.
+Run on branch `claude/reject-subset-and-saturation` (main `ddbdf76` merged) with cargo/rustc 1.97.0 on Linux. These match `.github/workflows/ci.yml` and `azure-pipelines.yml`.
 
 | Command | Result at HEAD |
 | --- | --- |
 | `cargo fmt --check` | pass |
 | `cargo clippy --all-targets --all-features -- -D warnings` | pass (0 warnings) |
 | `cargo build --all-features` | pass |
-| `cargo test --all-features` | pass: 25 lib + 4 `parity_harness` + 0 doctests |
-| `cargo test --all-features --lib` | pass: 25 tests |
+| `cargo test --all-features` | pass: 28 lib + 4 `parity_harness` + 0 doctests |
+| `cargo test --all-features --lib` | pass: 28 tests |
 | `cargo test --all-features --test parity_harness` | pass: 4 tests |
 
 Not verified locally: `docker build .` (no Docker daemon in the verification environment). CI builds it with `FEATURES=sentry` via `.github/workflows/docker.yml`.
