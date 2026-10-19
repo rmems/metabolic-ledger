@@ -13,6 +13,7 @@ There is no `rust-toolchain.toml`; CI uses `dtolnay/rust-toolchain` stable. `Car
 | `cargo fmt --check` | verified |
 | `cargo clippy --all-targets -- -D warnings` | verified (default features) |
 | `cargo test` | verified (25 unit tests, 4 in `tests/parity_harness.rs`; default features) |
+| `cargo build` | verified (default features) |
 | `cargo clippy --all-targets --all-features -- -D warnings` | not run (`--all-features` pulls the `sentry` tree; disk was nearly full); CI runs it |
 | `cargo build --all-features`, `cargo test --all-features` | not run (same reason); CI runs both on Linux, Windows, macOS |
 | `docker build .` (`docker.yml`) | not run (Docker not available) |
