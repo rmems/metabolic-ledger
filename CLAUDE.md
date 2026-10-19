@@ -8,20 +8,20 @@ The authority for accounting behavior is [`docs/accounting-contract.md`](docs/ac
 
 Do not break these. Each one is enforced in code or written in the contract.
 
-1. **Research and paper only.** No venue connectivity, credentials, or network I/O ("Paper only" in the contract). The crate has no network dependencies: just `serde`, `serde_json`, `chrono`, and optional `sentry`. It does no model training. The legacy engine only appends JSONL logs that SNN training can use elsewhere.
+1. **Research and paper only.** No venue connectivity, credentials, or network I/O ("Paper only" in the contract). The crate has no network dependencies: just `serde`, `serde_json`, `chrono`, and optional `sentry`. It does no model training. The legacy engine (`src/engine.rs`) executes simulated buys and sells that mutate `GhostWallet` state, and appends JSONL logs that SNN training can use elsewhere.
 2. **Economic accounting is separate from ATP/Kelly policy.**
    - `PaperLedger` (`src/paper.rs`) owns cash, inventory, total cost, realized PnL and fees. It can compute unrealized PnL from a mark price the caller passes in.
    - `AtpPolicy` (`src/policy.rs`), `GhostWallet` (`src/wallet.rs`) and `execute_buy` / `execute_sell` (`src/engine.rs`) are experimental sizing policy. They are not accounting inputs.
    - `PaperLedger` does not import the policy module. `apply_fill` takes the accepted quantity as given and never applies a `propose_buy_spend` / `propose_sell_qty` proposal.
    - `tests/parity_harness.rs::realized_pnl_never_reads_atp_or_kelly` guards this.
    - `METABOLIC_COST` is ATP friction, not an exchange fee.
-3. **Integer units on the paper path.** Prices are `price_ticks: i64`, sizes are `qty_lots: i64`, and money is in quote subunits (`i64`). Scales come from `Scale` in `src/units.rs`. There is no `f32`/`f64` on this path. Arithmetic is checked, and overflow is `LedgerError::OutOfRange`. The legacy `execute_*` / `GhostTradeLog` path is `f32` and is **not** the parity path.
+3. **Integer units on the paper path.** Prices are `price_ticks: i64`, sizes are `qty_lots: i64`, and money is in quote subunits (`i64`). Scales come from `Scale` in `src/units.rs`. There is no `f32`/`f64` on this path. Fill arithmetic is checked, and overflow is `LedgerError::OutOfRange`. Exception: `PaperLedger::weighted_cost_basis_ticks()` (a derived snapshot value) saturates to `i64::MIN` / `i64::MAX` when the i128 result does not fit in `i64`, instead of returning an error. Do not rely on it at extreme magnitudes. The legacy `execute_*` / `GhostTradeLog` path is `f32` and is **not** the parity path.
 4. **Fees and rebates are applied exactly once per fill.** `fee_subunits > 0` is a commission and `< 0` is a rebate. Buy fees enter the cost basis.
 5. **Supported subset: one instrument, long or flat.**
    - Overselling, or selling from flat, is `LedgerError::UnsupportedShort`.
    - A second symbol is `LedgerError::InstrumentMismatch`.
    - `UnsupportedSubset` is declared for other out-of-subset features, but no code path returns it at HEAD.
-   - Nothing is clamped or silently coerced.
+   - Fill quantities and positions are never clamped or silently coerced (see invariant 3 for the one saturating derived value).
    - A failed call leaves committed state unchanged. `plan_fill` computes the result, and `commit_fill` mutates state only on success.
 6. **`fill_id` identity.**
    - Same `fill_id` with the same payload returns `ApplyOutcome::IdempotentReplay`. There is no second debit. The ledger appends an audit row with `idempotent_replay = true` and `realized_pnl_delta = 0`.
