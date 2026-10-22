@@ -1,0 +1,53 @@
+{
+  "schema": "metabolic-ledger.parity.v1",
+  "schema_version": 1,
+  "source": "hand-verified",
+  "name": "partial_close",
+  "units": {
+    "instrument": "ASSET_A",
+    "quote": "USD",
+    "price_scale": 100,
+    "qty_scale": 1
+  },
+  "initial": {
+    "cash_subunits": 100000
+  },
+  "events": [
+    {
+      "kind": "fill",
+      "fill_id": "f1",
+      "event_time_ns": 1,
+      "instrument": "ASSET_A",
+      "side": "buy",
+      "price_ticks": 1000,
+      "qty_lots": 10,
+      "fee_subunits": 5
+    },
+    {
+      "kind": "fill",
+      "fill_id": "f2",
+      "event_time_ns": 2,
+      "instrument": "ASSET_A",
+      "side": "sell",
+      "price_ticks": 1100,
+      "qty_lots": 4,
+      "fee_subunits": 4
+    }
+  ],
+  "mark_price_ticks": 1100,
+  "expected": {
+    "cash_subunits": 94391,
+    "inventory_lots": 6,
+    "total_cost_subunits": 6003,
+    "weighted_cost_basis_ticks": 1000,
+    "realized_pnl_subunits": 394,
+    "fees_subunits": 9,
+    "unrealized_pnl_subunits": 597
+  },
+  "tolerances": {
+    "cash_subunits": 0,
+    "realized_pnl_subunits": 0,
+    "unrealized_pnl_subunits": 0,
+    "fees_subunits": 0
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "schema": "metabolic-ledger.parity.v1",
+  "schema_version": 1,
+  "source": "hand-verified",
+  "name": "rebate",
+  "units": {
+    "instrument": "ASSET_A",
+    "quote": "USD",
+    "price_scale": 100,
+    "qty_scale": 1
+  },
+  "initial": {
+    "cash_subunits": 100000
+  },
+  "events": [
+    {
+      "kind": "fill",
+      "fill_id": "r1",
+      "event_time_ns": 5,
+      "instrument": "ASSET_A",
+      "side": "buy",
+      "price_ticks": 5000,
+      "qty_lots": 1,
+      "fee_subunits": -10
+    }
+  ],
+  "expected": {
+    "cash_subunits": 95010,
+    "inventory_lots": 1,
+    "total_cost_subunits": 4990,
+    "weighted_cost_basis_ticks": 4990,
+    "realized_pnl_subunits": 0,
+    "fees_subunits": -10
+  },
+  "tolerances": {
+    "cash_subunits": 0,
+    "realized_pnl_subunits": 0,
+    "unrealized_pnl_subunits": 0,
+    "fees_subunits": 0
+  }
+}

@@ -16,10 +16,23 @@ concepts to constrain position sizing. Each trade signal consumes a fraction of
 available ATP, with a metabolic cost modelling spread/slippage. All decisions are
 logged to JSONL for SNN training data and post-hoc analysis.
 
+## Paper accounting (RM-1863)
+
+Exact-fill economic accounting is **`PaperLedger`**, not `execute_buy` / `execute_sell`.
+
+- Supported subset: **one instrument**, **long or flat** (`inventory >= 0`). Buys add; sells reduce or close and must not exceed holdings. Shorts and oversells are `UnsupportedShort`; a second instrument is `InstrumentMismatch`. Derivatives are not expressible (fills carry no contract, leverage, or funding fields). Nothing is clamped. `UnsupportedSubset` is reserved and not returned today.
+- Units: integer ticks / lots / quote subunits (`Scale`). Shipped fixtures use `price_scale = 100`, `qty_scale = 1`. Realized PnL is integer; no float drift.
+- Fees and accepted size are applied **once**. Duplicate `fill_id` is idempotent (or a conflict if the payload differs).
+- ATP / Kelly (`AtpPolicy`, `GhostWallet`, `execute_*`) is policy only. `PaperLedger` does not read it.
+- Golden fixtures: `fixtures/v1/*.json`, schema `metabolic-ledger.parity.v1`. Shipped v1 files are immutable; additional v1 files (e.g. DendriteTrader.jl RM-1864 emissions) are allowed only if they keep v1 semantics, and semantic changes need a new schema version and directory. Offline only.
+
+See [`docs/accounting-contract.md`](docs/accounting-contract.md).
+
 ## Features
 
+- `PaperLedger` / `AcceptedFill` — deterministic integer fill application (long/flat, single name)
 - `GhostWallet` — dynamic multi-asset portfolio with weighted-average cost basis per asset
-- `execute_buy` / `execute_sell` — ATP-gated order execution with metabolic cost
+- `execute_buy` / `execute_sell` — ATP-gated order execution with metabolic cost (legacy policy path)
 - `CELLULAR_ATP = 500.0` — initial energy budget (quote-unit equivalent)
 - `ENERGY_COMMITMENT = 0.08` — 8% of available energy per signal
 - `METABOLIC_COST = 0.001` — 0.1% friction per action

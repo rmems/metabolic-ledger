@@ -4,7 +4,11 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Ghost trade execution engine.
+//! Ghost trade execution engine (legacy ATP / Kelly **policy** path).
+//!
+//! [`execute_buy`] and [`execute_sell`] size from ATP and Kelly. They are not
+//! the exact-fill accounting API. Accepted simulated fills go through
+//! [`crate::paper::PaperLedger`], which never reads ATP.
 
 use crate::log::{GhostTradeLog, append_ghost_log};
 use crate::wallet::GhostWallet;
