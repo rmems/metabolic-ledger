@@ -84,3 +84,11 @@ docs/
 - Run the full check list above before claiming a change is done.
 - `Cargo.lock` is gitignored. This is a library crate, and dependency versions resolve at build time.
 - Report negative or failing results as they are. Treat any parity "pass" with a nonzero tolerance, or a relaxed fixture, as suspect.
+
+## Gotchas
+
+- Copyright notices and the Azure DevOps URL keep `Limen-Neural` on purpose (`docs/transfer-hygiene.md`). Do not "fix" them to `rmems`.
+- `.claude/` is not gitignored (`.gitignore` lists only `/target/` and `Cargo.lock`); do not commit local agent state there.
+- `Cargo.toml` has `exclude = ["docs/"]` only. Adding root docs does not require a manifest change.
+- There is no `rust-toolchain.toml`; CI pins stable via workflow. With `Cargo.lock` gitignored, do not pass `--locked` to Cargo.
+- Never run `cargo publish` from this library crate.
