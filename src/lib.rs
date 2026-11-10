@@ -84,7 +84,9 @@ pub use error::LedgerError;
 pub use ghost_fill::{GhostFill, GhostFillError, apply_ghost_fill};
 /// Re-export of the trade log record type.
 pub use log::GhostTradeLog;
-pub use paper::{AcceptedFill, ApplyOutcome, NonFillEvent, NonFillKind, PaperLedger};
+pub use paper::{
+    AcceptedFill, ApplyOutcome, LedgerSnapshot, NonFillEvent, NonFillKind, PaperLedger,
+};
 pub use policy::AtpPolicy;
 pub use types::Side;
 pub use units::Scale;

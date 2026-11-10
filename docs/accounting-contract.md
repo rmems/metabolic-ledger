@@ -95,6 +95,33 @@ unrealized = notional(mark, inventory) - total_cost
 - Same `fill_id` + same payload → `ApplyOutcome::IdempotentReplay` (no second debit; an audit row with `idempotent_replay = true`).
 - Same `fill_id` + different payload → `duplicate_fill_conflict`.
 
+## Restart and restore (RM-2471)
+
+Persist the complete `LedgerSnapshot` returned by `PaperLedger::snapshot` (or the
+JSON from `snapshot_json`). Deserialize JSON as `paper::LedgerSnapshot` and pass
+it to `PaperLedger::from_snapshot`. No snapshot fields or parity-v1 formats change;
+existing snapshots with their complete audit are supported.
+
+Restore replays the audit in its original order to rebuild the book and the
+applied-fill fingerprint index, including optional order/decision identities and
+event times. It verifies every audit row and the final economic fields. Empty
+books and non-fill-only histories are supported. Missing required row fields,
+inconsistent rows, conflicting identities, invalid fills, or an economic state
+that does not match the history return a typed `LedgerError`; no partial ledger
+is returned. Persist the snapshot atomically and keep its **entire, unmodified
+audit**. This is not a compacted-history or tamper-proof storage format.
+
+After restore, an already-applied identical fill returns `IdempotentReplay` and
+does not change cash, inventory, total cost, realized PnL, or fees. As before a
+restart, it appends **one** replay audit row with zero realized-PnL delta;
+restoration itself preserves the original audit exactly and adds no rows.
+A changed payload for an existing `fill_id` is `duplicate_fill_conflict` without
+mutation. A new fill applies normally, even when it shares an order identity
+with an earlier partial fill. Protection is keyed by `fill_id`, not `order_id`.
+
+`unrealized_pnl_subunits` is an external mark-derived observation and is not
+restored as state. Supply a mark again when taking a new snapshot.
+
 ## Non-fills
 
 `reject`, `cancel`, and `non_fill` append audit rows with `realized_pnl_delta = 0`. They do not change cash, inventory, cost, or fees.

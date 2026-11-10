@@ -154,6 +154,92 @@ impl PaperLedger {
         })
     }
 
+    /// Restore a complete snapshot, including duplicate-fill protection.
+    ///
+    /// Replays the full audit in order and verifies every row and the final
+    /// economic state. Missing or inconsistent history is rejected, not silently
+    /// adopted without its fill identities. Snapshot fields and parity-v1 audit
+    /// semantics are unchanged. The external unrealized-PnL mark is not restored.
+    ///
+    /// Persist [`Self::snapshot`] (or deserialize [`Self::snapshot_json`] into
+    /// [`LedgerSnapshot`]) without pruning its audit before calling this method.
+    pub fn from_snapshot(mut snapshot: LedgerSnapshot) -> Result<Self, LedgerError> {
+        let scale = Scale {
+            price_scale: snapshot.price_scale,
+            qty_scale: snapshot.qty_scale,
+        };
+        let mut book = Self::new(&snapshot.instrument, scale, snapshot.cash_subunits)?;
+        let audit = std::mem::take(&mut snapshot.audit);
+        for (index, row) in audit.iter().enumerate() {
+            let missing = || LedgerError::MalformedInput {
+                reason: format!("snapshot audit row {index} is missing a required field"),
+            };
+            match row.kind {
+                AuditKind::Fill => {
+                    let fill = AcceptedFill {
+                        fill_id: row.fill_id.clone().ok_or_else(missing)?,
+                        order_id: row.order_id.clone(),
+                        decision_id: row.decision_id.clone(),
+                        event_time_ns: row.event_time_ns,
+                        instrument: row.instrument.clone(),
+                        side: row.side.ok_or_else(missing)?,
+                        price_ticks: row.price_ticks.ok_or_else(missing)?,
+                        qty_lots: row.qty_lots.ok_or_else(missing)?,
+                        fee_subunits: row.fee_subunits.ok_or_else(missing)?,
+                    };
+                    if index == 0 {
+                        // Invert the first fill to recover starting cash. The
+                        // same checked arithmetic was required when it committed.
+                        let notional = scale.notional_subunits(fill.price_ticks, fill.qty_lots)?;
+                        book.cash_subunits = match fill.side {
+                            Side::Buy => checked_add(
+                                row.cash_after,
+                                checked_add(notional, fill.fee_subunits, "buy debit")?,
+                                "initial cash",
+                            )?,
+                            Side::Sell => checked_sub(
+                                row.cash_after,
+                                checked_sub(notional, fill.fee_subunits, "sell credit")?,
+                                "initial cash",
+                            )?,
+                        };
+                    }
+                    book.apply_fill(fill)?;
+                }
+                AuditKind::Reject | AuditKind::Cancel | AuditKind::NonFill => {
+                    if index == 0 {
+                        book.cash_subunits = row.cash_after;
+                    }
+                    book.record_non_fill(NonFillEvent {
+                        event_time_ns: row.event_time_ns,
+                        kind: match row.kind {
+                            AuditKind::Reject => NonFillKind::Reject,
+                            AuditKind::Cancel => NonFillKind::Cancel,
+                            _ => NonFillKind::NonFill,
+                        },
+                        order_id: row.order_id.clone().ok_or_else(missing)?,
+                        instrument: row.instrument.clone(),
+                        reason: row.reason.clone().ok_or_else(missing)?,
+                    })?;
+                }
+            }
+            if book.audit.last() != Some(row) {
+                return Err(LedgerError::MalformedInput {
+                    reason: format!("snapshot audit row {index} does not match replay"),
+                });
+            }
+        }
+        snapshot.audit = audit;
+        // Unrealized PnL is derived from an external mark, not committed state.
+        snapshot.unrealized_pnl_subunits = 0;
+        if book.snapshot(None)? != snapshot {
+            return Err(LedgerError::MalformedInput {
+                reason: "snapshot economic state does not match its complete audit".into(),
+            });
+        }
+        Ok(book)
+    }
+
     pub fn instrument(&self) -> &str {
         &self.instrument
     }
@@ -737,6 +823,125 @@ mod tests {
         assert_eq!(book.total_cost_subunits(), -5_000);
         assert_eq!(book.fees_subunits(), -15_000);
         assert_eq!(book.realized_pnl_subunits(), 0);
+    }
+
+    #[test]
+    fn restored_ledger_replays_already_applied_fill() {
+        let mut book = ledger();
+        let mut first = buy("r1", 1, 1000, 10, 5);
+        first.order_id = Some("ord-1".into());
+        first.decision_id = Some("dec-1".into());
+        book.apply_fill(first.clone()).unwrap();
+        book.record_non_fill(NonFillEvent {
+            event_time_ns: 2,
+            kind: NonFillKind::Cancel,
+            order_id: "ord-2".into(),
+            instrument: "ASSET_A".into(),
+            reason: "user_cancel".into(),
+        })
+        .unwrap();
+        book.apply_fill(sell("r2", 3, 1100, 4, 4)).unwrap();
+
+        let json = book.snapshot_json(Some(1200)).unwrap();
+        let snap: LedgerSnapshot = serde_json::from_str(&json).unwrap();
+        let mut restored = PaperLedger::from_snapshot(snap).unwrap();
+        assert_eq!(restored.snapshot_json(None), book.snapshot_json(None));
+        assert_eq!(restored.audit().len(), 3);
+
+        let before = restored.snapshot(None).unwrap();
+        assert_eq!(
+            restored.apply_fill(first.clone()).unwrap(),
+            ApplyOutcome::IdempotentReplay
+        );
+        assert_eq!(
+            book.apply_fill(first).unwrap(),
+            ApplyOutcome::IdempotentReplay
+        );
+        let after = restored.snapshot(None).unwrap();
+        assert_eq!(after.cash_subunits, before.cash_subunits);
+        assert_eq!(after.inventory_lots, before.inventory_lots);
+        assert_eq!(after.total_cost_subunits, before.total_cost_subunits);
+        assert_eq!(after.realized_pnl_subunits, before.realized_pnl_subunits);
+        assert_eq!(after.fees_subunits, before.fees_subunits);
+        // parity-v1: a replay appends exactly one replay row, same as before restart.
+        assert_eq!(after.audit.len(), before.audit.len() + 1);
+        assert!(after.audit.last().unwrap().idempotent_replay);
+        assert_eq!(restored.snapshot_json(None), book.snapshot_json(None));
+
+        let conflict = sell("r2", 3, 1100, 4, 5);
+        let pre_conflict = restored.snapshot_json(None).unwrap();
+        assert!(matches!(
+            restored.apply_fill(conflict),
+            Err(LedgerError::DuplicateFillConflict { .. })
+        ));
+        assert_eq!(restored.snapshot_json(None).unwrap(), pre_conflict);
+    }
+
+    #[test]
+    fn new_fill_after_restore_applies_normally() {
+        let mut book = ledger();
+        book.apply_fill(buy("n1", 1, 1000, 10, 5)).unwrap();
+        let mut restored = PaperLedger::from_snapshot(book.snapshot(None).unwrap()).unwrap();
+        let next = sell("n2", 2, 1100, 4, 4);
+        assert_eq!(
+            restored.apply_fill(next.clone()).unwrap(),
+            ApplyOutcome::Applied
+        );
+        book.apply_fill(next).unwrap();
+        assert_eq!(restored.cash_subunits(), 94_391);
+        assert_eq!(restored.inventory_lots(), 6);
+        assert_eq!(restored.realized_pnl_subunits(), 394);
+        assert_eq!(restored.snapshot_json(None), book.snapshot_json(None));
+    }
+
+    #[test]
+    fn restore_handles_empty_and_non_fill_only_books() {
+        let empty = ledger();
+        let restored = PaperLedger::from_snapshot(empty.snapshot(None).unwrap()).unwrap();
+        assert_eq!(restored.snapshot_json(None), empty.snapshot_json(None));
+
+        let mut book = ledger();
+        book.record_non_fill(NonFillEvent {
+            event_time_ns: 1,
+            kind: NonFillKind::Reject,
+            order_id: "o1".into(),
+            instrument: "ASSET_A".into(),
+            reason: "no_liquidity".into(),
+        })
+        .unwrap();
+        let restored = PaperLedger::from_snapshot(book.snapshot(None).unwrap()).unwrap();
+        assert_eq!(restored.snapshot_json(None), book.snapshot_json(None));
+    }
+
+    #[test]
+    fn restore_rejects_inconsistent_or_pruned_snapshots() {
+        let mut book = ledger();
+        book.apply_fill(buy("p1", 1, 1000, 10, 5)).unwrap();
+        book.apply_fill(buy("p2", 2, 1000, 1, 0)).unwrap();
+        let good = book.snapshot(None).unwrap();
+
+        let mut pruned = good.clone();
+        pruned.audit.remove(0);
+        assert!(PaperLedger::from_snapshot(pruned).is_err());
+
+        let mut cleared = good.clone();
+        cleared.audit.clear();
+        assert!(PaperLedger::from_snapshot(cleared).is_err());
+
+        let mut cash = good.clone();
+        cash.cash_subunits += 1;
+        assert!(PaperLedger::from_snapshot(cash).is_err());
+
+        let mut row = good.clone();
+        row.audit[1].cash_after += 1;
+        assert!(PaperLedger::from_snapshot(row).is_err());
+
+        let mut missing = good;
+        missing.audit[0].side = None;
+        assert!(matches!(
+            PaperLedger::from_snapshot(missing),
+            Err(LedgerError::MalformedInput { .. })
+        ));
     }
 
     #[test]

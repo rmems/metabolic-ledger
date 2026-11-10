@@ -141,6 +141,129 @@ fn realized_pnl_never_reads_atp_or_kelly() {
     assert_eq!(book.realized_pnl_subunits(), 995);
 }
 
+#[test]
+fn every_shipped_fixture_survives_snapshot_restore() {
+    use metabolic_ledger::parity::FixtureEvent;
+    use metabolic_ledger::{ApplyOutcome, LedgerSnapshot, NonFillEvent, NonFillKind};
+
+    let mut paths: Vec<_> = fs::read_dir(shipped_fixture_dir())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
+        .collect();
+    paths.sort();
+    for path in paths {
+        let fx = load_fixture(&path).unwrap();
+        let mut book = PaperLedger::new(
+            &fx.units.instrument,
+            scale_of(&fx),
+            fx.initial.cash_subunits,
+        )
+        .unwrap();
+        let mut fills = Vec::new();
+        for event in &fx.events {
+            let (kind, order_id, event_time_ns, instrument, reason) = match event {
+                FixtureEvent::Fill {
+                    fill_id,
+                    order_id,
+                    decision_id,
+                    event_time_ns,
+                    instrument,
+                    side,
+                    price_ticks,
+                    qty_lots,
+                    fee_subunits,
+                } => {
+                    let fill = AcceptedFill {
+                        fill_id: fill_id.clone(),
+                        order_id: order_id.clone(),
+                        decision_id: decision_id.clone(),
+                        event_time_ns: *event_time_ns,
+                        instrument: instrument.clone(),
+                        side: *side,
+                        price_ticks: *price_ticks,
+                        qty_lots: *qty_lots,
+                        fee_subunits: *fee_subunits,
+                    };
+                    if book.apply_fill(fill.clone()).is_ok() {
+                        fills.push(fill);
+                    }
+                    continue;
+                }
+                FixtureEvent::Reject {
+                    order_id,
+                    event_time_ns,
+                    instrument,
+                    reason,
+                } => (
+                    NonFillKind::Reject,
+                    order_id,
+                    event_time_ns,
+                    instrument,
+                    reason,
+                ),
+                FixtureEvent::Cancel {
+                    order_id,
+                    event_time_ns,
+                    instrument,
+                    reason,
+                } => (
+                    NonFillKind::Cancel,
+                    order_id,
+                    event_time_ns,
+                    instrument,
+                    reason,
+                ),
+                FixtureEvent::NonFill {
+                    order_id,
+                    event_time_ns,
+                    instrument,
+                    reason,
+                } => (
+                    NonFillKind::NonFill,
+                    order_id,
+                    event_time_ns,
+                    instrument,
+                    reason,
+                ),
+            };
+            let _ = book.record_non_fill(NonFillEvent {
+                event_time_ns: *event_time_ns,
+                kind,
+                order_id: order_id.clone(),
+                instrument: instrument.clone(),
+                reason: reason.clone(),
+            });
+        }
+
+        let json = book.snapshot_json(fx.mark_price_ticks).unwrap();
+        let snap: LedgerSnapshot = serde_json::from_str(&json).unwrap();
+        let mut restored =
+            PaperLedger::from_snapshot(snap).unwrap_or_else(|e| panic!("restore {}: {e}", fx.name));
+        assert_eq!(
+            restored.snapshot_json(fx.mark_price_ticks).unwrap(),
+            json,
+            "{}",
+            fx.name
+        );
+        for fill in fills {
+            let before = restored.snapshot(None).unwrap();
+            assert_eq!(
+                restored.apply_fill(fill).unwrap(),
+                ApplyOutcome::IdempotentReplay,
+                "{}",
+                fx.name
+            );
+            let after = restored.snapshot(None).unwrap();
+            assert_eq!(after.cash_subunits, before.cash_subunits);
+            assert_eq!(after.inventory_lots, before.inventory_lots);
+            assert_eq!(after.total_cost_subunits, before.total_cost_subunits);
+            assert_eq!(after.realized_pnl_subunits, before.realized_pnl_subunits);
+            assert_eq!(after.fees_subunits, before.fees_subunits);
+        }
+    }
+}
+
 fn scale_of(fx: &metabolic_ledger::parity::ParityFixture) -> Scale {
     Scale {
         price_scale: fx.units.price_scale,
