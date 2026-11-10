@@ -18,6 +18,9 @@ pub struct AuditRecord {
     pub kind: AuditKind,
     pub fill_id: Option<String>,
     pub order_id: Option<String>,
+    /// Optional traceability extension, omitted to preserve legacy row JSON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision_id: Option<String>,
     pub instrument: String,
     pub side: Option<Side>,
     pub price_ticks: Option<i64>,

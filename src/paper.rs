@@ -26,6 +26,12 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AcceptedFill {
     pub fill_id: String,
+    /// Caller-supplied order identity; absent on legacy fills.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order_id: Option<String>,
+    /// Caller-supplied decision identity; absent on legacy fills.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision_id: Option<String>,
     /// Injected event time (nanoseconds). Not wall clock.
     pub event_time_ns: u64,
     pub instrument: String,
@@ -66,6 +72,8 @@ impl NonFillKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FillFingerprint {
+    order_id: Option<String>,
+    decision_id: Option<String>,
     event_time_ns: u64,
     instrument: String,
     side: Side,
@@ -77,6 +85,8 @@ struct FillFingerprint {
 impl FillFingerprint {
     fn from_fill(fill: &AcceptedFill) -> Self {
         Self {
+            order_id: fill.order_id.clone(),
+            decision_id: fill.decision_id.clone(),
             event_time_ns: fill.event_time_ns,
             instrument: fill.instrument.clone(),
             side: fill.side,
@@ -260,6 +270,7 @@ impl PaperLedger {
             kind: event.kind.audit_kind(),
             fill_id: None,
             order_id: Some(event.order_id),
+            decision_id: None,
             instrument: self.instrument.clone(),
             side: None,
             price_ticks: None,
@@ -394,7 +405,8 @@ impl PaperLedger {
             event_time_ns: fill.event_time_ns,
             kind: AuditKind::Fill,
             fill_id: Some(fill.fill_id),
-            order_id: None,
+            order_id: fill.order_id,
+            decision_id: fill.decision_id,
             instrument: self.instrument.clone(),
             side: Some(fill.side),
             price_ticks: Some(fill.price_ticks),
@@ -415,7 +427,8 @@ impl PaperLedger {
             event_time_ns: fill.event_time_ns,
             kind: AuditKind::Fill,
             fill_id: Some(fill.fill_id.clone()),
-            order_id: None,
+            order_id: fill.order_id.clone(),
+            decision_id: fill.decision_id.clone(),
             instrument: self.instrument.clone(),
             side: Some(fill.side),
             price_ticks: Some(fill.price_ticks),
@@ -476,6 +489,8 @@ mod tests {
     fn buy(id: &str, t: u64, px: i64, qty: i64, fee: i64) -> AcceptedFill {
         AcceptedFill {
             fill_id: id.into(),
+            order_id: None,
+            decision_id: None,
             event_time_ns: t,
             instrument: "ASSET_A".into(),
             side: Side::Buy,
@@ -488,6 +503,8 @@ mod tests {
     fn sell(id: &str, t: u64, px: i64, qty: i64, fee: i64) -> AcceptedFill {
         AcceptedFill {
             fill_id: id.into(),
+            order_id: None,
+            decision_id: None,
             event_time_ns: t,
             instrument: "ASSET_A".into(),
             side: Side::Sell,
@@ -630,6 +647,8 @@ mod tests {
         .unwrap();
         book.apply_fill(AcceptedFill {
             fill_id: "frac".into(),
+            order_id: None,
+            decision_id: None,
             event_time_ns: 1,
             instrument: "ASSET_A".into(),
             side: Side::Buy,
@@ -716,6 +735,8 @@ mod tests {
         let err = book
             .apply_fill(AcceptedFill {
                 fill_id: "x".into(),
+                order_id: None,
+                decision_id: None,
                 event_time_ns: 1,
                 instrument: "ASSET_B".into(),
                 side: Side::Buy,
