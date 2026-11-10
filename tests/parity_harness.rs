@@ -3,12 +3,8 @@
 //! Julia-emitted documents (RM-1864) can be dropped next to the hand-verified
 //! files in `fixtures/v1/` without changing this test.
 
-use metabolic_ledger::parity::{
-    FixtureEvent, ParityFixture, load_fixture, run_fixture, shipped_fixture_dir,
-};
-use metabolic_ledger::{
-    AcceptedFill, ApplyOutcome, Ledger, LedgerSnapshot, NonFillEvent, NonFillKind, Scale, Side,
-};
+use metabolic_ledger::parity::{load_fixture, run_fixture, shipped_fixture_dir};
+use metabolic_ledger::{AcceptedFill, Ledger, Scale, Side};
 use std::fs;
 
 #[test]
@@ -144,6 +140,13 @@ fn realized_pnl_never_reads_atp_or_kelly() {
     assert_eq!(book.realized_pnl_subunits(), 11000 - 10005);
     assert_eq!(book.realized_pnl_subunits(), 995);
 }
+
+// Restore-path imports, kept here (not in the header block) so this branch
+// merges cleanly across the RM-2474 PaperLedger -> Ledger rename: the header
+// import lines are byte-identical to main.
+use metabolic_ledger::ledger::LedgerSnapshot;
+use metabolic_ledger::parity::{FixtureEvent, ParityFixture};
+use metabolic_ledger::{ApplyOutcome, NonFillEvent, NonFillKind};
 
 #[test]
 fn every_shipped_fixture_survives_snapshot_restore() {

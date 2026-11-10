@@ -82,7 +82,7 @@ pub use engine::{CELLULAR_ATP, ENERGY_COMMITMENT, METABOLIC_COST, execute_buy, e
 /// Re-export of the economic-accounting surface used by the parity harness.
 pub use error::LedgerError;
 pub use ghost_fill::{GhostFill, GhostFillError, apply_ghost_fill};
-pub use ledger::{AcceptedFill, ApplyOutcome, Ledger, LedgerSnapshot, NonFillEvent, NonFillKind};
+pub use ledger::{AcceptedFill, ApplyOutcome, Ledger, NonFillEvent, NonFillKind};
 /// Re-export of the trade log record type.
 pub use log::GhostTradeLog;
 pub use policy::AtpPolicy;
