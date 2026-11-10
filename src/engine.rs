@@ -7,8 +7,8 @@
 //! Ghost trade execution engine (legacy ATP / Kelly **policy** path).
 //!
 //! [`execute_buy`] and [`execute_sell`] size from ATP and Kelly. They are not
-//! the exact-fill accounting API. Accepted simulated fills go through
-//! [`crate::paper::PaperLedger`], which never reads ATP.
+//! the exact-fill accounting API. Accepted fills go through
+//! [`crate::ledger::Ledger`], which never reads ATP.
 
 use crate::wallet::GhostWallet;
 use crate::{GhostFill, Side, apply_ghost_fill};

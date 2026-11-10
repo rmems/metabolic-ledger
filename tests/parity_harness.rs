@@ -4,7 +4,7 @@
 //! files in `fixtures/v1/` without changing this test.
 
 use metabolic_ledger::parity::{load_fixture, run_fixture, shipped_fixture_dir};
-use metabolic_ledger::{AcceptedFill, PaperLedger, Scale, Side};
+use metabolic_ledger::{AcceptedFill, Ledger, Scale, Side};
 use std::fs;
 
 #[test]
@@ -37,7 +37,7 @@ fn same_fixture_is_byte_stable_across_replays() {
     let fx = load_fixture(&path).unwrap();
     let mut snaps = Vec::new();
     for _ in 0..3 {
-        let mut book = PaperLedger::new(
+        let mut book = Ledger::new(
             &fx.units.instrument,
             scale_of(&fx),
             fx.initial.cash_subunits,
@@ -78,7 +78,7 @@ fn same_fixture_is_byte_stable_across_replays() {
 
 #[test]
 fn fees_and_qty_applied_once_including_duplicate_id() {
-    let mut book = PaperLedger::new("ASSET_A", Scale::CENTS_WHOLE_LOTS, 100_000).unwrap();
+    let mut book = Ledger::new("ASSET_A", Scale::CENTS_WHOLE_LOTS, 100_000).unwrap();
     let fill = AcceptedFill {
         fill_id: "once".into(),
         order_id: None,
@@ -110,7 +110,7 @@ fn realized_pnl_never_reads_atp_or_kelly() {
     let proposal = policy.propose_buy_spend(wallet.balance_atp);
     assert!((proposal - 0.99).abs() < 1e-6);
 
-    let mut book = PaperLedger::new("ASSET_A", Scale::CENTS_WHOLE_LOTS, 100_000).unwrap();
+    let mut book = Ledger::new("ASSET_A", Scale::CENTS_WHOLE_LOTS, 100_000).unwrap();
     book.apply_fill(AcceptedFill {
         fill_id: "econ".into(),
         order_id: None,

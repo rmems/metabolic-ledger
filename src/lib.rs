@@ -16,9 +16,9 @@
 //!
 //! All trades are logged to JSONL for SNN training data and performance analysis.
 //!
-//! ## Paper accounting (RM-1863)
+//! ## Deterministic accounting (RM-1863)
 //!
-//! [`paper::PaperLedger`] applies an already-decided fill exactly once on a
+//! [`ledger::Ledger`] applies an already-decided fill exactly once on a
 //! **single-instrument long/flat** book. Units, fees, and the Julia fixture
 //! contract are documented in `docs/accounting-contract.md`.
 //! ATP/Kelly live in [`policy`] and the legacy [`engine`] helpers; realized
@@ -43,10 +43,10 @@
 //! - Alberts, B. et al. (2002). *Molecular Biology of the Cell* (4th ed.).
 //!   ATP as cellular energy currency — conceptual basis for CELLULAR_ATP metaphor.
 
-/// Deterministic paper-ledger audit records (injected event time).
+/// Deterministic ledger audit records (injected event time).
 pub mod audit;
 
-/// Typed paper-ledger errors (no silent coerce / clamp).
+/// Typed ledger errors (no silent coerce / clamp).
 pub mod error;
 
 /// Ghost trade execution engine with buy/sell logic and metabolic constants.
@@ -61,13 +61,13 @@ pub mod log;
 /// Versioned golden-fixture schema and replay harness.
 pub mod parity;
 
-/// Exact-fill paper ledger (economic accounting; no ATP).
-pub mod paper;
+/// Exact-fill ledger (economic accounting; no ATP).
+pub mod ledger;
 
 /// ATP / Kelly sizing policy — experimental, not an accounting input.
 pub mod policy;
 
-/// Shared paper-market enums.
+/// Shared market enums.
 pub mod types;
 
 /// Integer price / quantity scales.
@@ -79,12 +79,12 @@ pub mod wallet;
 
 /// Re-export of primary engine constants and execution functions for convenience.
 pub use engine::{CELLULAR_ATP, ENERGY_COMMITMENT, METABOLIC_COST, execute_buy, execute_sell};
-/// Re-export of the paper-accounting surface used by the parity harness.
+/// Re-export of the economic-accounting surface used by the parity harness.
 pub use error::LedgerError;
 pub use ghost_fill::{GhostFill, GhostFillError, apply_ghost_fill};
+pub use ledger::{AcceptedFill, ApplyOutcome, Ledger, NonFillEvent, NonFillKind};
 /// Re-export of the trade log record type.
 pub use log::GhostTradeLog;
-pub use paper::{AcceptedFill, ApplyOutcome, NonFillEvent, NonFillKind, PaperLedger};
 pub use policy::AtpPolicy;
 pub use types::Side;
 pub use units::Scale;

@@ -7,7 +7,7 @@
 //! ATP / Kelly **policy** state.
 //!
 //! This module proposes experimental position sizes. It is not an accounting
-//! input. [`crate::paper::PaperLedger`] does not import this module, and
+//! input. [`crate::ledger::Ledger`] does not import this module, and
 //! realized PnL never reads ATP.
 
 use crate::engine::{ENERGY_COMMITMENT, METABOLIC_COST};
@@ -15,7 +15,7 @@ use crate::engine::{ENERGY_COMMITMENT, METABOLIC_COST};
 /// Experimental energy-budget policy used by the legacy ghost engine.
 ///
 /// Metabolic cost here is an ATP friction term. It is **not** an economic
-/// commission. Economic fees live only on accepted fills in [`crate::paper`].
+/// commission. Economic fees live only on accepted fills in [`crate::ledger`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct AtpPolicy {
     /// Fraction of ATP proposed per signal (legacy default 0.08).
@@ -35,13 +35,13 @@ impl AtpPolicy {
     ///
     /// The adaptive Kelly fraction on [`crate::wallet::GhostWallet`] is a
     /// separate policy output. This method does not read it, and
-    /// [`crate::paper::PaperLedger`] does not apply the result.
+    /// [`crate::ledger::Ledger`] does not apply the result.
     pub fn propose_buy_spend(&self, balance_atp: f32) -> f32 {
         balance_atp * self.energy_commitment
     }
 
     /// Proposed inventory to sell: `inventory * energy_commitment`.
-    /// Never applied by [`crate::paper`].
+    /// Never applied by [`crate::ledger`].
     pub fn propose_sell_qty(&self, inventory: f32) -> f32 {
         inventory * self.energy_commitment
     }

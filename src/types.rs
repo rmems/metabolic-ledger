@@ -4,7 +4,7 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Shared paper-market enums.
+//! Shared market enums.
 
 use serde::{Deserialize, Serialize};
 

@@ -14,7 +14,7 @@
 
 use crate::audit::AuditRecord;
 use crate::error::LedgerError;
-use crate::paper::{AcceptedFill, ApplyOutcome, NonFillEvent, NonFillKind, PaperLedger};
+use crate::ledger::{AcceptedFill, ApplyOutcome, Ledger, NonFillEvent, NonFillKind};
 use crate::types::Side;
 use crate::units::Scale;
 use serde::{Deserialize, Serialize};
@@ -161,7 +161,7 @@ pub fn run_fixture(fx: &ParityFixture) -> Result<(), String> {
         price_scale: fx.units.price_scale,
         qty_scale: fx.units.qty_scale,
     };
-    let mut book = PaperLedger::new(&fx.units.instrument, scale, fx.initial.cash_subunits)
+    let mut book = Ledger::new(&fx.units.instrument, scale, fx.initial.cash_subunits)
         .map_err(|e| e.to_string())?;
 
     if fx.initial.inventory_lots != 0 || fx.initial.total_cost_subunits != 0 {
@@ -204,7 +204,7 @@ pub fn run_fixture(fx: &ParityFixture) -> Result<(), String> {
     compare_state(fx, &book)
 }
 
-fn apply_event(book: &mut PaperLedger, event: &FixtureEvent) -> Result<ApplyOutcome, LedgerError> {
+fn apply_event(book: &mut Ledger, event: &FixtureEvent) -> Result<ApplyOutcome, LedgerError> {
     match event {
         FixtureEvent::Fill {
             fill_id,
@@ -275,7 +275,7 @@ fn apply_event(book: &mut PaperLedger, event: &FixtureEvent) -> Result<ApplyOutc
     }
 }
 
-fn compare_state(fx: &ParityFixture, book: &PaperLedger) -> Result<(), String> {
+fn compare_state(fx: &ParityFixture, book: &Ledger) -> Result<(), String> {
     let snap = book
         .snapshot(fx.mark_price_ticks)
         .map_err(|e| e.to_string())?;

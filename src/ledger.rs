@@ -4,7 +4,7 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Exact-fill paper ledger for the declared M2 accounting subset.
+//! Exact-fill deterministic ledger for the declared M2 accounting subset.
 //!
 //! Supported: one instrument, long or flat inventory (`inventory_lots >= 0`).
 //! Buys open or add. Sells reduce or close and must not exceed holdings.
@@ -22,7 +22,7 @@ use crate::units::{Scale, checked_add, checked_sub};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// An already-decided simulated fill. Quantity is not resized by policy.
+/// An already-decided fill. Quantity is not resized by policy.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AcceptedFill {
     pub fill_id: String,
@@ -99,7 +99,7 @@ impl FillFingerprint {
 
 /// Deterministic single-instrument long/flat ledger.
 #[derive(Debug, Clone)]
-pub struct PaperLedger {
+pub struct Ledger {
     instrument: String,
     scale: Scale,
     cash_subunits: i64,
@@ -127,7 +127,7 @@ pub struct LedgerSnapshot {
     pub audit: Vec<AuditRecord>,
 }
 
-impl PaperLedger {
+impl Ledger {
     /// Empty long/flat book for `instrument` with starting cash.
     pub fn new(
         instrument: impl Into<String>,
@@ -454,7 +454,7 @@ impl PaperLedger {
     }
 }
 
-/// Result of [`PaperLedger::apply_fill`].
+/// Result of [`Ledger::apply_fill`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApplyOutcome {
     Applied,
@@ -492,8 +492,8 @@ fn allocate_cost(total_cost: i64, sell_lots: i64, inventory: i64) -> Result<i64,
 mod tests {
     use super::*;
 
-    fn ledger() -> PaperLedger {
-        PaperLedger::new("ASSET_A", Scale::CENTS_WHOLE_LOTS, 100_000).unwrap()
+    fn ledger() -> Ledger {
+        Ledger::new("ASSET_A", Scale::CENTS_WHOLE_LOTS, 100_000).unwrap()
     }
 
     fn buy(id: &str, t: u64, px: i64, qty: i64, fee: i64) -> AcceptedFill {
@@ -646,7 +646,7 @@ mod tests {
 
     #[test]
     fn basis_is_ticks_per_asset_unit_when_qty_scale_exceeds_one() {
-        let mut book = PaperLedger::new(
+        let mut book = Ledger::new(
             "ASSET_A",
             Scale {
                 price_scale: 100,
@@ -682,8 +682,8 @@ mod tests {
     /// Book whose cost basis overflows `i64` once multiplied by `qty_scale`.
     /// `qty_scale = 2`, one lot at 2 ticks (notional 1), and a fee chosen so
     /// `total_cost * 2` lies outside `i64`. Every individual fill step fits.
-    fn book_with_basis_fee(fee: i64) -> PaperLedger {
-        let mut book = PaperLedger::new(
+    fn book_with_basis_fee(fee: i64) -> Ledger {
+        let mut book = Ledger::new(
             "ASSET_A",
             Scale {
                 price_scale: 100,

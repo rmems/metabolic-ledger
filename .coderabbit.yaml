@@ -15,16 +15,12 @@ reviews:
     instructions: 'Rust edition 2024; no `rust-version`; CI uses stable on Linux, Windows and macOS. Do not suggest downgrading the edition or using std/language APIs newer than the pinned toolchain/MSRV. CI gate: `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --all-features`. Flag anything that would fail `cargo fmt --check` or clippy `-D warnings`. Keep code portable across the three CI OSes (paths, line endings, no Unix-only APIs without cfg). The `sentry` feature is optional.'
   - path: '**/Cargo.toml'
     instructions: Cargo manifest. Call out new dependencies and feature changes, and keep `rust-version` / `edition` consistent with CI.
-  - path: Dockerfile
-    instructions: Dockerfile. Keep secrets out of layers and build args, and keep toolchain versions in line with the CI pins.
   - path: .github/workflows/**
     instructions: GitHub Actions workflows. Keep `permissions:` least-privilege and job commands in sync with the local gates documented in the repo. Most `uses:` are pinned to full commit SHAs; prefer SHA pins for new or bumped actions.
   - path: azure-pipelines.yml
     instructions: Mirror CI on Azure Pipelines; keep its cargo commands in step with the GitHub workflow.
   tools:
     clippy:
-      enabled: true
-    hadolint:
       enabled: true
     actionlint:
       enabled: true

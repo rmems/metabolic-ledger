@@ -1,6 +1,6 @@
 # Azure Pipelines for cross-platform parity (Linux, Windows, macOS)
 # This yaml is used exclusively by the "full-ci" pipeline (id=5, renamed from long metabolic-ledger-full-ci) in the "CI CD" project under https://dev.azure.com/Limen-Neural .
-# Matches GH CI + Docker build. Uses matrix as per review/plan.
+# Matches GH CI. Uses matrix as per review/plan.
 # See #7 for full trifecta context. Validated structure for Azure YAML.
 # (Legacy "metabolic-ledger-ci" id=4 duplicate definition removed to prevent double runs / "two rounds". The top-level "full-ci" check in GitHub is the standard matrix aggregator; the (Build linux/mac/windows) are the execution legs.)
 
