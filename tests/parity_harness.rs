@@ -187,7 +187,7 @@ enum FixtureStep {
 }
 
 fn fixture_step(event: &FixtureEvent) -> FixtureStep {
-    match event.clone() {
+    match event {
         FixtureEvent::Fill {
             fill_id,
             order_id,
@@ -199,68 +199,50 @@ fn fixture_step(event: &FixtureEvent) -> FixtureStep {
             qty_lots,
             fee_subunits,
         } => FixtureStep::Fill(AcceptedFill {
-            fill_id,
-            order_id,
-            decision_id,
-            event_time_ns,
-            instrument,
-            side,
-            price_ticks,
-            qty_lots,
-            fee_subunits,
+            fill_id: fill_id.clone(),
+            order_id: order_id.clone(),
+            decision_id: decision_id.clone(),
+            event_time_ns: *event_time_ns,
+            instrument: instrument.clone(),
+            side: *side,
+            price_ticks: *price_ticks,
+            qty_lots: *qty_lots,
+            fee_subunits: *fee_subunits,
         }),
-        FixtureEvent::Reject {
-            order_id,
-            event_time_ns,
-            instrument,
-            reason,
-        } => non_fill_step(
-            NonFillKind::Reject,
-            order_id,
-            event_time_ns,
-            instrument,
-            reason,
-        ),
-        FixtureEvent::Cancel {
-            order_id,
-            event_time_ns,
-            instrument,
-            reason,
-        } => non_fill_step(
-            NonFillKind::Cancel,
-            order_id,
-            event_time_ns,
-            instrument,
-            reason,
-        ),
-        FixtureEvent::NonFill {
-            order_id,
-            event_time_ns,
-            instrument,
-            reason,
-        } => non_fill_step(
-            NonFillKind::NonFill,
-            order_id,
-            event_time_ns,
-            instrument,
-            reason,
-        ),
+        FixtureEvent::Reject { .. } => non_fill_step(NonFillKind::Reject, event),
+        FixtureEvent::Cancel { .. } => non_fill_step(NonFillKind::Cancel, event),
+        FixtureEvent::NonFill { .. } => non_fill_step(NonFillKind::NonFill, event),
     }
 }
 
-fn non_fill_step(
-    kind: NonFillKind,
-    order_id: String,
-    event_time_ns: u64,
-    instrument: String,
-    reason: String,
-) -> FixtureStep {
-    FixtureStep::NonFill(NonFillEvent {
-        event_time_ns,
-        kind,
+fn non_fill_step(kind: NonFillKind, event: &FixtureEvent) -> FixtureStep {
+    let (FixtureEvent::Reject {
         order_id,
+        event_time_ns,
         instrument,
         reason,
+    }
+    | FixtureEvent::Cancel {
+        order_id,
+        event_time_ns,
+        instrument,
+        reason,
+    }
+    | FixtureEvent::NonFill {
+        order_id,
+        event_time_ns,
+        instrument,
+        reason,
+    }) = event
+    else {
+        unreachable!("non_fill_step requires a non-fill event")
+    };
+    FixtureStep::NonFill(NonFillEvent {
+        event_time_ns: *event_time_ns,
+        kind,
+        order_id: order_id.clone(),
+        instrument: instrument.clone(),
+        reason: reason.clone(),
     })
 }
 
