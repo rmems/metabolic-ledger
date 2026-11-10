@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Guidance for Claude Code in `rmems/metabolic-ledger`, a Rust library crate (no binary). It does paper accounting and runs ATP/Kelly sizing experiments for SNN portfolio research. Nothing here trades real money.
+Guidance for Claude Code in `rmems/metabolic-ledger`, a Rust library crate (no binary). It does deterministic accounting and runs ATP/Kelly sizing experiments for SNN portfolio research. Execution happens outside this crate.
 
 The authority for accounting behavior is [`docs/accounting-contract.md`](docs/accounting-contract.md). If this file and the contract disagree, the contract wins. Fix this file.
 
@@ -8,14 +8,14 @@ The authority for accounting behavior is [`docs/accounting-contract.md`](docs/ac
 
 Do not break these. Each one is enforced in code or written in the contract.
 
-1. **Research and paper only.** No venue connectivity, credentials, or network I/O ("Paper only" in the contract). The crate has no network dependencies: just `serde`, `serde_json`, `chrono`, and optional `sentry`. It does no model training. The legacy engine (`src/engine.rs`) executes simulated buys and sells that mutate `GhostWallet` state, and appends JSONL logs that SNN training can use elsewhere.
+1. **Accounting only.** No venue connectivity, credentials, or network I/O ("Accounting only" in the contract). The crate has no network dependencies: just `serde`, `serde_json`, `chrono`, and optional `sentry`. It does no model training. The legacy engine (`src/engine.rs`) executes simulated buys and sells that mutate `GhostWallet` state, and appends JSONL logs that SNN training can use elsewhere.
 2. **Economic accounting is separate from ATP/Kelly policy.**
-   - `PaperLedger` (`src/paper.rs`) owns cash, inventory, total cost, realized PnL and fees. It can compute unrealized PnL from a mark price the caller passes in.
+   - `Ledger` (`src/ledger.rs`) owns cash, inventory, total cost, realized PnL and fees. It can compute unrealized PnL from a mark price the caller passes in.
    - `AtpPolicy` (`src/policy.rs`), `GhostWallet` (`src/wallet.rs`) and `execute_buy` / `execute_sell` (`src/engine.rs`) are experimental sizing policy. They are not accounting inputs.
-   - `PaperLedger` does not import the policy module. `apply_fill` takes the accepted quantity as given and never applies a `propose_buy_spend` / `propose_sell_qty` proposal.
+   - `Ledger` does not import the policy module. `apply_fill` takes the accepted quantity as given and never applies a `propose_buy_spend` / `propose_sell_qty` proposal.
    - `tests/parity_harness.rs::realized_pnl_never_reads_atp_or_kelly` guards this.
    - `METABOLIC_COST` is ATP friction, not an exchange fee.
-3. **Integer units on the paper path.** Prices are `price_ticks: i64`, sizes are `qty_lots: i64`, and money is in quote subunits (`i64`). Scales come from `Scale` in `src/units.rs`. There is no `f32`/`f64` on this path. Fill arithmetic is checked, and overflow is `LedgerError::OutOfRange`. Derived values are checked too: `PaperLedger::checked_weighted_cost_basis_ticks()` returns `OutOfRange` when the i128 result does not fit in `i64` (no saturation), and `snapshot`, `snapshot_json` and the parity harness propagate that error instead of comparing a clamped number. The legacy `execute_*` / `GhostTradeLog` path is `f32` and is **not** the parity path.
+3. **Integer units on the accounting path.** Prices are `price_ticks: i64`, sizes are `qty_lots: i64`, and money is in quote subunits (`i64`). Scales come from `Scale` in `src/units.rs`. There is no `f32`/`f64` on this path. Fill arithmetic is checked, and overflow is `LedgerError::OutOfRange`. Derived values are checked too: `Ledger::checked_weighted_cost_basis_ticks()` returns `OutOfRange` when the i128 result does not fit in `i64` (no saturation), and `snapshot`, `snapshot_json` and the parity harness propagate that error instead of comparing a clamped number. The legacy `execute_*` / `GhostTradeLog` path is `f32` and is **not** the parity path.
 4. **Fees and rebates are applied exactly once per fill.** `fee_subunits > 0` is a commission and `< 0` is a rebate. Buy fees enter the cost basis.
 5. **Supported subset: one instrument, long or flat.**
    - Overselling, or selling from flat, is `LedgerError::UnsupportedShort`.
@@ -28,7 +28,7 @@ Do not break these. Each one is enforced in code or written in the contract.
    - Same `fill_id` with the same payload returns `ApplyOutcome::IdempotentReplay`. There is no second debit. The ledger appends an audit row with `idempotent_replay = true` and `realized_pnl_delta = 0`.
    - Same `fill_id` with a different payload is `DuplicateFillConflict`.
 7. **Non-fills.** `reject`, `cancel` and `non_fill` go through `record_non_fill`. They append audit rows with `realized_pnl_delta = 0` and do not touch cash, inventory, cost or fees.
-8. **Deterministic time.** `event_time_ns` is injected by the caller. The paper ledger and audit records never read the wall clock. Only the legacy `execute_*` path calls `Utc::now()`.
+8. **Deterministic time.** `event_time_ns` is injected by the caller. The ledger and audit records never read the wall clock. Only the legacy `execute_*` path calls `Utc::now()`.
 9. **Golden fixtures are a cross-language contract.**
    - The fixtures are `fixtures/v1/*.json`, with schema id `metabolic-ledger.parity.v1` and `schema_version: 1` (`src/parity.rs`).
    - DendriteTrader.jl (RM-1864) is meant to emit the same JSON.
@@ -50,8 +50,6 @@ Run on branch `claude/reject-subset-and-saturation` (main `ddbdf76` merged) with
 | `cargo test --all-features --lib` | pass: 28 tests |
 | `cargo test --all-features --test parity_harness` | pass: 4 tests |
 
-Not verified locally: `docker build .` (no Docker daemon in the verification environment). CI builds it with `FEATURES=sentry` via `.github/workflows/docker.yml`.
-
 The README code examples are not compiled as doctests (0 doctests run), so they can drift from the API.
 
 ## Architecture map
@@ -59,7 +57,7 @@ The README code examples are not compiled as doctests (0 doctests run), so they 
 ```
 src/
   lib.rs      crate docs and public re-exports
-  paper.rs    PaperLedger, AcceptedFill, NonFillEvent, ApplyOutcome (economic accounting)
+  ledger.rs   Ledger, AcceptedFill, NonFillEvent, ApplyOutcome (economic accounting)
   units.rs    Scale; checked i64 notional/add/sub
   error.rs    LedgerError (typed, stable type_name() strings used by fixtures)
   audit.rs    AuditRecord / AuditKind (injected event time)
@@ -74,13 +72,13 @@ tests/
 fixtures/v1/   hand-verified golden files (buy, partial/full close, rebate, duplicate fill,
                reject, cancel/non-fill, short rejected, instrument mismatch)
 docs/
-  accounting-contract.md  authoritative paper-accounting contract (units, sign rules, cost basis)
+  accounting-contract.md  authoritative accounting contract (units, sign rules, cost basis)
   transfer-hygiene.md     repo transfer audit notes
 ```
 
 ## Working notes for Claude
 
-- Put new accounting behavior in `paper.rs` and the contract doc together. Add a fixture or unit test for it.
+- Put new accounting behavior in `ledger.rs` and the contract doc together. Add a fixture or unit test for it.
 - Run the full check list above before claiming a change is done.
 - `Cargo.lock` is gitignored. This is a library crate, and dependency versions resolve at build time.
 - Report negative or failing results as they are. Treat any parity "pass" with a nonzero tolerance, or a relaxed fixture, as suspect.

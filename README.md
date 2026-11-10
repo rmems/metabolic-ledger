@@ -16,21 +16,24 @@ concepts to constrain position sizing. Each trade signal consumes a fraction of
 available ATP, with a metabolic cost modelling spread/slippage. All decisions are
 logged to JSONL for SNN training data and post-hoc analysis.
 
-## Paper accounting (RM-1863)
+## Deterministic accounting (RM-1863)
 
-Exact-fill economic accounting is **`PaperLedger`**, not `execute_buy` / `execute_sell`.
+Exact-fill economic accounting is **`Ledger`**, not `execute_buy` / `execute_sell`.
+
+Import it as `metabolic_ledger::Ledger` or `metabolic_ledger::ledger::Ledger`.
+See [the 0.2.0 migration notes](CHANGELOG.md) for the breaking API rename.
 
 - Supported subset: **one instrument**, **long or flat** (`inventory >= 0`). Buys add; sells reduce or close and must not exceed holdings. Shorts and oversells are `UnsupportedShort`; a second instrument is `InstrumentMismatch`. Derivatives are not expressible (fills carry no contract, leverage, or funding fields). Nothing is clamped. `UnsupportedSubset` is reserved and not returned today.
 - Units: integer ticks / lots / quote subunits (`Scale`). Shipped fixtures use `price_scale = 100`, `qty_scale = 1`. Realized PnL is integer; no float drift.
 - Fees and accepted size are applied **once**. Duplicate `fill_id` is idempotent (or a conflict if the payload differs).
-- ATP / Kelly (`AtpPolicy`, `GhostWallet`, `execute_*`) is policy only. `PaperLedger` does not read it.
+- ATP / Kelly (`AtpPolicy`, `GhostWallet`, `execute_*`) is policy only. `Ledger` does not read it.
 - Golden fixtures: `fixtures/v1/*.json`, schema `metabolic-ledger.parity.v1`. Shipped v1 files are immutable; additional v1 files (e.g. DendriteTrader.jl RM-1864 emissions) are allowed only if they keep v1 semantics, and semantic changes need a new schema version and directory. Offline only.
 
 See [`docs/accounting-contract.md`](docs/accounting-contract.md).
 
 ## Features
 
-- `PaperLedger` / `AcceptedFill` — deterministic integer fill application (long/flat, single name)
+- `Ledger` / `AcceptedFill` — deterministic integer fill application (long/flat, single name)
 - `GhostWallet` — dynamic multi-asset portfolio with weighted-average cost basis per asset
 - `execute_buy` / `execute_sell` — ATP-gated order execution with metabolic cost (legacy policy path)
 - `apply_ghost_fill` / `GhostFill` — caller-sized multi-asset `f32` ghost fills, with explicit quote-unit friction and a `Result<GhostTradeLog, GhostFillError>`. No second Kelly sizing. Invalid fills, insufficient funds/holdings, and JSONL write errors leave the wallet unchanged. Buy friction enters cost basis and is realized on sale, including in win-rate/Kelly statistics. This is a compatibility bridge, not the integer parity API.
@@ -57,7 +60,7 @@ Recommended for reproducibility:
 
 ```toml
 # Pin to a release tag
-metabolic-ledger = { git = "https://github.com/rmems/metabolic-ledger", tag = "v0.1.0" }
+metabolic-ledger = { git = "https://github.com/rmems/metabolic-ledger", tag = "v0.2.0" }
 
 # Or pin to an exact commit
 metabolic-ledger = { git = "https://github.com/rmems/metabolic-ledger", rev = "<commit-sha>" }
@@ -161,7 +164,7 @@ Enable via feature flag (uses the official `sentry` Rust crate):
 [dependencies]
 metabolic-ledger = { git = "...", features = ["sentry"] }
 # or from crates.io once published
-# metabolic-ledger = { version = "0.1", features = ["sentry"] }
+# metabolic-ledger = { version = "0.2", features = ["sentry"] }
 ```
 
 In your application entrypoint (binary), initialize Sentry **once**:
