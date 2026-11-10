@@ -3,8 +3,12 @@
 //! Julia-emitted documents (RM-1864) can be dropped next to the hand-verified
 //! files in `fixtures/v1/` without changing this test.
 
-use metabolic_ledger::parity::{load_fixture, run_fixture, shipped_fixture_dir};
-use metabolic_ledger::{AcceptedFill, PaperLedger, Scale, Side};
+use metabolic_ledger::parity::{
+    FixtureEvent, ParityFixture, load_fixture, run_fixture, shipped_fixture_dir,
+};
+use metabolic_ledger::{
+    AcceptedFill, ApplyOutcome, LedgerSnapshot, NonFillEvent, NonFillKind, PaperLedger, Scale, Side,
+};
 use std::fs;
 
 #[test]
@@ -143,8 +147,6 @@ fn realized_pnl_never_reads_atp_or_kelly() {
 
 #[test]
 fn every_shipped_fixture_survives_snapshot_restore() {
-    use metabolic_ledger::LedgerSnapshot;
-
     for path in shipped_fixture_paths() {
         let fx = load_fixture(&path).unwrap();
         let (book, fills, rejected) = replay_fixture(&fx);
@@ -181,24 +183,11 @@ fn shipped_fixture_paths() -> Vec<std::path::PathBuf> {
 
 enum FixtureStep {
     Fill(AcceptedFill),
-    NonFill(metabolic_ledger::NonFillEvent),
+    NonFill(NonFillEvent),
 }
 
-fn fixture_step(event: &metabolic_ledger::parity::FixtureEvent) -> FixtureStep {
-    use metabolic_ledger::parity::FixtureEvent;
-    use metabolic_ledger::{NonFillEvent, NonFillKind};
-
-    let non_fill =
-        |kind, order_id: &String, event_time_ns: &u64, instrument: &String, reason: &String| {
-            FixtureStep::NonFill(NonFillEvent {
-                event_time_ns: *event_time_ns,
-                kind,
-                order_id: order_id.clone(),
-                instrument: instrument.clone(),
-                reason: reason.clone(),
-            })
-        };
-    match event {
+fn fixture_step(event: &FixtureEvent) -> FixtureStep {
+    match event.clone() {
         FixtureEvent::Fill {
             fill_id,
             order_id,
@@ -210,22 +199,22 @@ fn fixture_step(event: &metabolic_ledger::parity::FixtureEvent) -> FixtureStep {
             qty_lots,
             fee_subunits,
         } => FixtureStep::Fill(AcceptedFill {
-            fill_id: fill_id.clone(),
-            order_id: order_id.clone(),
-            decision_id: decision_id.clone(),
-            event_time_ns: *event_time_ns,
-            instrument: instrument.clone(),
-            side: *side,
-            price_ticks: *price_ticks,
-            qty_lots: *qty_lots,
-            fee_subunits: *fee_subunits,
+            fill_id,
+            order_id,
+            decision_id,
+            event_time_ns,
+            instrument,
+            side,
+            price_ticks,
+            qty_lots,
+            fee_subunits,
         }),
         FixtureEvent::Reject {
             order_id,
             event_time_ns,
             instrument,
             reason,
-        } => non_fill(
+        } => non_fill_step(
             NonFillKind::Reject,
             order_id,
             event_time_ns,
@@ -237,7 +226,7 @@ fn fixture_step(event: &metabolic_ledger::parity::FixtureEvent) -> FixtureStep {
             event_time_ns,
             instrument,
             reason,
-        } => non_fill(
+        } => non_fill_step(
             NonFillKind::Cancel,
             order_id,
             event_time_ns,
@@ -249,7 +238,7 @@ fn fixture_step(event: &metabolic_ledger::parity::FixtureEvent) -> FixtureStep {
             event_time_ns,
             instrument,
             reason,
-        } => non_fill(
+        } => non_fill_step(
             NonFillKind::NonFill,
             order_id,
             event_time_ns,
@@ -259,11 +248,27 @@ fn fixture_step(event: &metabolic_ledger::parity::FixtureEvent) -> FixtureStep {
     }
 }
 
+fn non_fill_step(
+    kind: NonFillKind,
+    order_id: String,
+    event_time_ns: u64,
+    instrument: String,
+    reason: String,
+) -> FixtureStep {
+    FixtureStep::NonFill(NonFillEvent {
+        event_time_ns,
+        kind,
+        order_id,
+        instrument,
+        reason,
+    })
+}
+
 /// Replay fixture events, returning the book plus the fills that committed
 /// (for idempotent-replay checks) and the fills that errored (with their
 /// `type_name`, for post-restore error checks).
 fn replay_fixture(
-    fx: &metabolic_ledger::parity::ParityFixture,
+    fx: &ParityFixture,
 ) -> (
     PaperLedger,
     Vec<AcceptedFill>,
@@ -290,9 +295,6 @@ fn replay_fixture(
 /// A fill committed before the snapshot must replay idempotently after
 /// restore: one audit row, zero economic change.
 fn assert_replays_idempotently(book: &mut PaperLedger, fill: AcceptedFill, name: &str) {
-    use metabolic_ledger::ApplyOutcome;
-    use metabolic_ledger::LedgerSnapshot;
-
     let before: LedgerSnapshot = book.snapshot(None).unwrap();
     assert_eq!(
         book.apply_fill(fill).unwrap(),
@@ -306,7 +308,7 @@ fn assert_replays_idempotently(book: &mut PaperLedger, fill: AcceptedFill, name:
     assert_eq!(state, before, "{name}");
 }
 
-fn scale_of(fx: &metabolic_ledger::parity::ParityFixture) -> Scale {
+fn scale_of(fx: &ParityFixture) -> Scale {
     Scale {
         price_scale: fx.units.price_scale,
         qty_scale: fx.units.qty_scale,
