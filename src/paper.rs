@@ -163,66 +163,23 @@ impl PaperLedger {
     ///
     /// Persist [`Self::snapshot`] (or deserialize [`Self::snapshot_json`] into
     /// [`LedgerSnapshot`]) without pruning its audit before calling this method.
+    /// The snapshot is consumed whether the restore succeeds or fails.
     pub fn from_snapshot(mut snapshot: LedgerSnapshot) -> Result<Self, LedgerError> {
         let scale = Scale {
             price_scale: snapshot.price_scale,
             qty_scale: snapshot.qty_scale,
         };
-        let mut book = Self::new(&snapshot.instrument, scale, snapshot.cash_subunits)?;
         let audit = std::mem::take(&mut snapshot.audit);
+        // Starting cash is recovered from the first audit row during replay.
+        // Only an empty audit adopts the snapshot cash directly.
+        let initial_cash = if audit.is_empty() {
+            snapshot.cash_subunits
+        } else {
+            0
+        };
+        let mut book = Self::new(&snapshot.instrument, scale, initial_cash)?;
         for (index, row) in audit.iter().enumerate() {
-            let missing = || LedgerError::MalformedInput {
-                reason: format!("snapshot audit row {index} is missing a required field"),
-            };
-            match row.kind {
-                AuditKind::Fill => {
-                    let fill = AcceptedFill {
-                        fill_id: row.fill_id.clone().ok_or_else(missing)?,
-                        order_id: row.order_id.clone(),
-                        decision_id: row.decision_id.clone(),
-                        event_time_ns: row.event_time_ns,
-                        instrument: row.instrument.clone(),
-                        side: row.side.ok_or_else(missing)?,
-                        price_ticks: row.price_ticks.ok_or_else(missing)?,
-                        qty_lots: row.qty_lots.ok_or_else(missing)?,
-                        fee_subunits: row.fee_subunits.ok_or_else(missing)?,
-                    };
-                    if index == 0 {
-                        // Invert the first fill to recover starting cash. The
-                        // same checked arithmetic was required when it committed.
-                        let notional = scale.notional_subunits(fill.price_ticks, fill.qty_lots)?;
-                        book.cash_subunits = match fill.side {
-                            Side::Buy => checked_add(
-                                row.cash_after,
-                                checked_add(notional, fill.fee_subunits, "buy debit")?,
-                                "initial cash",
-                            )?,
-                            Side::Sell => checked_sub(
-                                row.cash_after,
-                                checked_sub(notional, fill.fee_subunits, "sell credit")?,
-                                "initial cash",
-                            )?,
-                        };
-                    }
-                    book.apply_fill(fill)?;
-                }
-                AuditKind::Reject | AuditKind::Cancel | AuditKind::NonFill => {
-                    if index == 0 {
-                        book.cash_subunits = row.cash_after;
-                    }
-                    book.record_non_fill(NonFillEvent {
-                        event_time_ns: row.event_time_ns,
-                        kind: match row.kind {
-                            AuditKind::Reject => NonFillKind::Reject,
-                            AuditKind::Cancel => NonFillKind::Cancel,
-                            _ => NonFillKind::NonFill,
-                        },
-                        order_id: row.order_id.clone().ok_or_else(missing)?,
-                        instrument: row.instrument.clone(),
-                        reason: row.reason.clone().ok_or_else(missing)?,
-                    })?;
-                }
-            }
+            Self::replay_audit_row(&mut book, row, index, scale)?;
             if book.audit.last() != Some(row) {
                 return Err(LedgerError::MalformedInput {
                     reason: format!("snapshot audit row {index} does not match replay"),
@@ -238,6 +195,32 @@ impl PaperLedger {
             });
         }
         Ok(book)
+    }
+
+    /// Replay one persisted audit row. The first row also recovers the
+    /// starting cash that the snapshot does not record directly.
+    fn replay_audit_row(
+        book: &mut Self,
+        row: &AuditRecord,
+        index: usize,
+        scale: Scale,
+    ) -> Result<(), LedgerError> {
+        match row.kind {
+            AuditKind::Fill => {
+                let fill = audit_row_fill(row, index)?;
+                if index == 0 {
+                    book.cash_subunits = initial_cash_after_fill(row, &fill, scale)?;
+                }
+                book.apply_fill(fill)?;
+            }
+            AuditKind::Reject | AuditKind::Cancel | AuditKind::NonFill => {
+                if index == 0 {
+                    book.cash_subunits = row.cash_after;
+                }
+                book.record_non_fill(audit_row_non_fill(row, index)?)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn instrument(&self) -> &str {
@@ -556,6 +539,78 @@ struct PlannedFill {
     fees: i64,
 }
 
+fn missing_audit_field(index: usize, field: &str) -> LedgerError {
+    LedgerError::MalformedInput {
+        reason: format!("snapshot audit row {index} is missing required field '{field}'"),
+    }
+}
+
+fn audit_row_fill(row: &AuditRecord, index: usize) -> Result<AcceptedFill, LedgerError> {
+    Ok(AcceptedFill {
+        fill_id: row
+            .fill_id
+            .clone()
+            .ok_or_else(|| missing_audit_field(index, "fill_id"))?,
+        order_id: row.order_id.clone(),
+        decision_id: row.decision_id.clone(),
+        event_time_ns: row.event_time_ns,
+        instrument: row.instrument.clone(),
+        side: row.side.ok_or_else(|| missing_audit_field(index, "side"))?,
+        price_ticks: row
+            .price_ticks
+            .ok_or_else(|| missing_audit_field(index, "price_ticks"))?,
+        qty_lots: row
+            .qty_lots
+            .ok_or_else(|| missing_audit_field(index, "qty_lots"))?,
+        fee_subunits: row
+            .fee_subunits
+            .ok_or_else(|| missing_audit_field(index, "fee_subunits"))?,
+    })
+}
+
+fn audit_row_non_fill(row: &AuditRecord, index: usize) -> Result<NonFillEvent, LedgerError> {
+    let kind = match row.kind {
+        AuditKind::Reject => NonFillKind::Reject,
+        AuditKind::Cancel => NonFillKind::Cancel,
+        _ => NonFillKind::NonFill,
+    };
+    Ok(NonFillEvent {
+        event_time_ns: row.event_time_ns,
+        kind,
+        order_id: row
+            .order_id
+            .clone()
+            .ok_or_else(|| missing_audit_field(index, "order_id"))?,
+        instrument: row.instrument.clone(),
+        reason: row
+            .reason
+            .clone()
+            .ok_or_else(|| missing_audit_field(index, "reason"))?,
+    })
+}
+
+/// Invert the first fill's committed cash delta to recover starting cash. The
+/// same checked arithmetic was required when the fill originally committed.
+fn initial_cash_after_fill(
+    row: &AuditRecord,
+    fill: &AcceptedFill,
+    scale: Scale,
+) -> Result<i64, LedgerError> {
+    let notional = scale.notional_subunits(fill.price_ticks, fill.qty_lots)?;
+    match fill.side {
+        Side::Buy => checked_add(
+            row.cash_after,
+            checked_add(notional, fill.fee_subunits, "buy debit")?,
+            "initial cash",
+        ),
+        Side::Sell => checked_sub(
+            row.cash_after,
+            checked_sub(notional, fill.fee_subunits, "sell credit")?,
+            "initial cash",
+        ),
+    }
+}
+
 /// Truncate toward zero; the last lot closes with remaining `total_cost`.
 fn allocate_cost(total_cost: i64, sell_lots: i64, inventory: i64) -> Result<i64, LedgerError> {
     if inventory <= 0 || sell_lots <= 0 {
@@ -608,6 +663,18 @@ mod tests {
             qty_lots: qty,
             fee_subunits: fee,
         }
+    }
+
+    /// An idempotent replay appends exactly one row and changes no economics.
+    fn assert_replay_only_appends_row(before: &LedgerSnapshot, after: LedgerSnapshot) {
+        let mut state = after;
+        let row = state.audit.pop().expect("replay appends one row");
+        assert!(row.idempotent_replay);
+        assert_eq!(state, *before);
+    }
+
+    fn assert_restore_fails(snapshot: LedgerSnapshot) {
+        assert!(PaperLedger::from_snapshot(snapshot).is_err());
     }
 
     #[test]
@@ -857,15 +924,8 @@ mod tests {
             book.apply_fill(first).unwrap(),
             ApplyOutcome::IdempotentReplay
         );
-        let after = restored.snapshot(None).unwrap();
-        assert_eq!(after.cash_subunits, before.cash_subunits);
-        assert_eq!(after.inventory_lots, before.inventory_lots);
-        assert_eq!(after.total_cost_subunits, before.total_cost_subunits);
-        assert_eq!(after.realized_pnl_subunits, before.realized_pnl_subunits);
-        assert_eq!(after.fees_subunits, before.fees_subunits);
         // parity-v1: a replay appends exactly one replay row, same as before restart.
-        assert_eq!(after.audit.len(), before.audit.len() + 1);
-        assert!(after.audit.last().unwrap().idempotent_replay);
+        assert_replay_only_appends_row(&before, restored.snapshot(None).unwrap());
         assert_eq!(restored.snapshot_json(None), book.snapshot_json(None));
 
         let conflict = sell("r2", 3, 1100, 4, 5);
@@ -888,9 +948,6 @@ mod tests {
             ApplyOutcome::Applied
         );
         book.apply_fill(next).unwrap();
-        assert_eq!(restored.cash_subunits(), 94_391);
-        assert_eq!(restored.inventory_lots(), 6);
-        assert_eq!(restored.realized_pnl_subunits(), 394);
         assert_eq!(restored.snapshot_json(None), book.snapshot_json(None));
     }
 
@@ -922,19 +979,19 @@ mod tests {
 
         let mut pruned = good.clone();
         pruned.audit.remove(0);
-        assert!(PaperLedger::from_snapshot(pruned).is_err());
+        assert_restore_fails(pruned);
 
         let mut cleared = good.clone();
         cleared.audit.clear();
-        assert!(PaperLedger::from_snapshot(cleared).is_err());
+        assert_restore_fails(cleared);
 
         let mut cash = good.clone();
         cash.cash_subunits += 1;
-        assert!(PaperLedger::from_snapshot(cash).is_err());
+        assert_restore_fails(cash);
 
         let mut row = good.clone();
         row.audit[1].cash_after += 1;
-        assert!(PaperLedger::from_snapshot(row).is_err());
+        assert_restore_fails(row);
 
         let mut missing = good;
         missing.audit[0].side = None;

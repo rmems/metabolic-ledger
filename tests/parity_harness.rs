@@ -143,98 +143,11 @@ fn realized_pnl_never_reads_atp_or_kelly() {
 
 #[test]
 fn every_shipped_fixture_survives_snapshot_restore() {
-    use metabolic_ledger::parity::FixtureEvent;
-    use metabolic_ledger::{ApplyOutcome, LedgerSnapshot, NonFillEvent, NonFillKind};
+    use metabolic_ledger::LedgerSnapshot;
 
-    let mut paths: Vec<_> = fs::read_dir(shipped_fixture_dir())
-        .unwrap()
-        .map(|e| e.unwrap().path())
-        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
-        .collect();
-    paths.sort();
-    for path in paths {
+    for path in shipped_fixture_paths() {
         let fx = load_fixture(&path).unwrap();
-        let mut book = PaperLedger::new(
-            &fx.units.instrument,
-            scale_of(&fx),
-            fx.initial.cash_subunits,
-        )
-        .unwrap();
-        let mut fills = Vec::new();
-        for event in &fx.events {
-            let (kind, order_id, event_time_ns, instrument, reason) = match event {
-                FixtureEvent::Fill {
-                    fill_id,
-                    order_id,
-                    decision_id,
-                    event_time_ns,
-                    instrument,
-                    side,
-                    price_ticks,
-                    qty_lots,
-                    fee_subunits,
-                } => {
-                    let fill = AcceptedFill {
-                        fill_id: fill_id.clone(),
-                        order_id: order_id.clone(),
-                        decision_id: decision_id.clone(),
-                        event_time_ns: *event_time_ns,
-                        instrument: instrument.clone(),
-                        side: *side,
-                        price_ticks: *price_ticks,
-                        qty_lots: *qty_lots,
-                        fee_subunits: *fee_subunits,
-                    };
-                    if book.apply_fill(fill.clone()).is_ok() {
-                        fills.push(fill);
-                    }
-                    continue;
-                }
-                FixtureEvent::Reject {
-                    order_id,
-                    event_time_ns,
-                    instrument,
-                    reason,
-                } => (
-                    NonFillKind::Reject,
-                    order_id,
-                    event_time_ns,
-                    instrument,
-                    reason,
-                ),
-                FixtureEvent::Cancel {
-                    order_id,
-                    event_time_ns,
-                    instrument,
-                    reason,
-                } => (
-                    NonFillKind::Cancel,
-                    order_id,
-                    event_time_ns,
-                    instrument,
-                    reason,
-                ),
-                FixtureEvent::NonFill {
-                    order_id,
-                    event_time_ns,
-                    instrument,
-                    reason,
-                } => (
-                    NonFillKind::NonFill,
-                    order_id,
-                    event_time_ns,
-                    instrument,
-                    reason,
-                ),
-            };
-            let _ = book.record_non_fill(NonFillEvent {
-                event_time_ns: *event_time_ns,
-                kind,
-                order_id: order_id.clone(),
-                instrument: instrument.clone(),
-                reason: reason.clone(),
-            });
-        }
+        let (book, fills, rejected) = replay_fixture(&fx);
 
         let json = book.snapshot_json(fx.mark_price_ticks).unwrap();
         let snap: LedgerSnapshot = serde_json::from_str(&json).unwrap();
@@ -247,21 +160,150 @@ fn every_shipped_fixture_survives_snapshot_restore() {
             fx.name
         );
         for fill in fills {
-            let before = restored.snapshot(None).unwrap();
-            assert_eq!(
-                restored.apply_fill(fill).unwrap(),
-                ApplyOutcome::IdempotentReplay,
-                "{}",
-                fx.name
-            );
-            let after = restored.snapshot(None).unwrap();
-            assert_eq!(after.cash_subunits, before.cash_subunits);
-            assert_eq!(after.inventory_lots, before.inventory_lots);
-            assert_eq!(after.total_cost_subunits, before.total_cost_subunits);
-            assert_eq!(after.realized_pnl_subunits, before.realized_pnl_subunits);
-            assert_eq!(after.fees_subunits, before.fees_subunits);
+            assert_replays_idempotently(&mut restored, fill, &fx.name);
+        }
+        for (fill, type_name) in rejected {
+            let err = restored.apply_fill(fill).unwrap_err();
+            assert_eq!(err.type_name(), type_name, "{}", fx.name);
         }
     }
+}
+
+fn shipped_fixture_paths() -> Vec<std::path::PathBuf> {
+    let mut paths: Vec<_> = fs::read_dir(shipped_fixture_dir())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
+        .collect();
+    paths.sort();
+    paths
+}
+
+enum FixtureStep {
+    Fill(AcceptedFill),
+    NonFill(metabolic_ledger::NonFillEvent),
+}
+
+fn fixture_step(event: &metabolic_ledger::parity::FixtureEvent) -> FixtureStep {
+    use metabolic_ledger::parity::FixtureEvent;
+    use metabolic_ledger::{NonFillEvent, NonFillKind};
+
+    let non_fill =
+        |kind, order_id: &String, event_time_ns: &u64, instrument: &String, reason: &String| {
+            FixtureStep::NonFill(NonFillEvent {
+                event_time_ns: *event_time_ns,
+                kind,
+                order_id: order_id.clone(),
+                instrument: instrument.clone(),
+                reason: reason.clone(),
+            })
+        };
+    match event {
+        FixtureEvent::Fill {
+            fill_id,
+            order_id,
+            decision_id,
+            event_time_ns,
+            instrument,
+            side,
+            price_ticks,
+            qty_lots,
+            fee_subunits,
+        } => FixtureStep::Fill(AcceptedFill {
+            fill_id: fill_id.clone(),
+            order_id: order_id.clone(),
+            decision_id: decision_id.clone(),
+            event_time_ns: *event_time_ns,
+            instrument: instrument.clone(),
+            side: *side,
+            price_ticks: *price_ticks,
+            qty_lots: *qty_lots,
+            fee_subunits: *fee_subunits,
+        }),
+        FixtureEvent::Reject {
+            order_id,
+            event_time_ns,
+            instrument,
+            reason,
+        } => non_fill(
+            NonFillKind::Reject,
+            order_id,
+            event_time_ns,
+            instrument,
+            reason,
+        ),
+        FixtureEvent::Cancel {
+            order_id,
+            event_time_ns,
+            instrument,
+            reason,
+        } => non_fill(
+            NonFillKind::Cancel,
+            order_id,
+            event_time_ns,
+            instrument,
+            reason,
+        ),
+        FixtureEvent::NonFill {
+            order_id,
+            event_time_ns,
+            instrument,
+            reason,
+        } => non_fill(
+            NonFillKind::NonFill,
+            order_id,
+            event_time_ns,
+            instrument,
+            reason,
+        ),
+    }
+}
+
+/// Replay fixture events, returning the book plus the fills that committed
+/// (for idempotent-replay checks) and the fills that errored (with their
+/// `type_name`, for post-restore error checks).
+fn replay_fixture(
+    fx: &metabolic_ledger::parity::ParityFixture,
+) -> (
+    PaperLedger,
+    Vec<AcceptedFill>,
+    Vec<(AcceptedFill, &'static str)>,
+) {
+    let mut book =
+        PaperLedger::new(&fx.units.instrument, scale_of(fx), fx.initial.cash_subunits).unwrap();
+    let mut fills = Vec::new();
+    let mut rejected = Vec::new();
+    for event in &fx.events {
+        match fixture_step(event) {
+            FixtureStep::Fill(fill) => match book.apply_fill(fill.clone()) {
+                Ok(_) => fills.push(fill),
+                Err(e) => rejected.push((fill, e.type_name())),
+            },
+            FixtureStep::NonFill(event) => book
+                .record_non_fill(event)
+                .unwrap_or_else(|e| panic!("{}: {e}", fx.name)),
+        }
+    }
+    (book, fills, rejected)
+}
+
+/// A fill committed before the snapshot must replay idempotently after
+/// restore: one audit row, zero economic change.
+fn assert_replays_idempotently(book: &mut PaperLedger, fill: AcceptedFill, name: &str) {
+    use metabolic_ledger::ApplyOutcome;
+    use metabolic_ledger::LedgerSnapshot;
+
+    let before: LedgerSnapshot = book.snapshot(None).unwrap();
+    assert_eq!(
+        book.apply_fill(fill).unwrap(),
+        ApplyOutcome::IdempotentReplay,
+        "{name}"
+    );
+    let after = book.snapshot(None).unwrap();
+    assert_eq!(after.audit.len(), before.audit.len() + 1, "{name}");
+    let mut state = after;
+    state.audit.pop();
+    assert_eq!(state, before, "{name}");
 }
 
 fn scale_of(fx: &metabolic_ledger::parity::ParityFixture) -> Scale {

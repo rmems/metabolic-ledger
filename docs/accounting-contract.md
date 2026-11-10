@@ -99,7 +99,9 @@ unrealized = notional(mark, inventory) - total_cost
 
 Persist the complete `LedgerSnapshot` returned by `PaperLedger::snapshot` (or the
 JSON from `snapshot_json`). Deserialize JSON as `paper::LedgerSnapshot` and pass
-it to `PaperLedger::from_snapshot`. No snapshot fields or parity-v1 formats change;
+it to `PaperLedger::from_snapshot`, which takes the snapshot by value: it is
+consumed whether the restore succeeds or fails, so keep your own copy if you
+need it afterwards. No snapshot fields or parity-v1 formats change;
 existing snapshots with their complete audit are supported.
 
 Restore replays the audit in its original order to rebuild the book and the
