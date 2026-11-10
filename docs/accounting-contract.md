@@ -9,6 +9,15 @@ This crate now exposes two layers:
 
 Legacy `execute_buy` / `execute_sell` still size from ATP × Kelly and write `f32` ghost logs. They are not the parity path. Do not treat `METABOLIC_COST` as an exchange fee.
 
+The legacy multi-asset wallet also exposes `apply_ghost_fill(GhostFill)`, a
+quantity-taking compatibility bridge. It applies caller-supplied quantity and
+non-negative quote-unit friction without ATP/Kelly resizing. Buy friction enters
+weighted cost basis and is realized on partial/full sales, including in adaptive
+Kelly statistics. Buy audit rows have zero realized PnL. It returns the actual
+`GhostTradeLog` or `GhostFillError`, including log I/O failures before wallet
+commit. A failed write may leave a partial JSONL line. This `f32` bridge is not
+the deterministic integer parity contract below; the v1 fixtures are unchanged.
+
 ## Supported subset (M2)
 
 - **One instrument** per `PaperLedger`. A different symbol is `instrument_mismatch`.

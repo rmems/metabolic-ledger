@@ -25,6 +25,7 @@ sentry = ["dep:sentry"]
 
 [dev-dependencies]
 proptest = "1.6"
+tempfile = "3"
 
 [profile.release]
 opt-level = 3

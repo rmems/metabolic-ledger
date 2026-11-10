@@ -145,6 +145,7 @@ impl PortfolioSummary {
 }
 
 /// Virtual ghost-trading wallet with biological ATP energy model.
+#[derive(Clone)]
 pub struct GhostWallet {
     /// ── ATP base (cellular ATP) ────────────────────────────────────────
     /// Initial and current cellular ATP balance (quote units).
@@ -224,7 +225,7 @@ impl GhostWallet {
         let new_balance = current_balance + qty;
 
         self.balances.insert(asset.to_string(), new_balance);
-        if new_balance > 1e-9 {
+        if new_balance > 0.0 {
             self.entry_prices
                 .insert(asset.to_string(), (prev_cost + net_spend) / new_balance);
         }
@@ -234,7 +235,7 @@ impl GhostWallet {
     pub(crate) fn apply_sell(&mut self, asset: &str, qty: f32) {
         let current_balance = *self.balances.get(asset).unwrap_or(&0.0);
         let new_balance = current_balance - qty;
-        if new_balance > 1e-9 {
+        if new_balance > 0.0 {
             self.balances.insert(asset.to_string(), new_balance);
             return;
         }

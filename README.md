@@ -33,6 +33,7 @@ See [`docs/accounting-contract.md`](docs/accounting-contract.md).
 - `PaperLedger` / `AcceptedFill` — deterministic integer fill application (long/flat, single name)
 - `GhostWallet` — dynamic multi-asset portfolio with weighted-average cost basis per asset
 - `execute_buy` / `execute_sell` — ATP-gated order execution with metabolic cost (legacy policy path)
+- `apply_ghost_fill` / `GhostFill` — caller-sized multi-asset `f32` ghost fills, with explicit quote-unit friction and a `Result<GhostTradeLog, GhostFillError>`. No second Kelly sizing. Invalid fills, insufficient funds/holdings, and JSONL write errors leave the wallet unchanged. Buy friction enters cost basis and is realized on sale, including in win-rate/Kelly statistics. This is a compatibility bridge, not the integer parity API.
 - `CELLULAR_ATP = 500.0` — initial energy budget (quote-unit equivalent)
 - `ENERGY_COMMITMENT = 0.08` — 8% of available energy per signal
 - `METABOLIC_COST = 0.001` — 0.1% friction per action
@@ -118,6 +119,13 @@ let summary: metabolic_ledger::PortfolioSummary = serde_json::from_str(json).unw
 ```
 
 ## With JSONL Audit Log
+
+`append_ghost_log` returns `std::io::Result<()>`. `apply_ghost_fill` propagates
+write errors before committing wallet state (a failed write may leave a partial
+log line). The legacy void `execute_*` wrappers retain their minimum-size no-ops
+and print rejected-fill errors; use `apply_ghost_fill` for programmatic outcomes.
+Buy log rows now report zero realized PnL; buy friction is included in sell PnL
+via cost basis, so summing log rows does not charge it twice.
 
 ```rust
 execute_buy(&mut wallet, "ASSET_A", 65.0, 1, "snn_fire", Some("trades.jsonl"));
