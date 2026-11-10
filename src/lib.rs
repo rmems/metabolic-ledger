@@ -52,6 +52,9 @@ pub mod error;
 /// Ghost trade execution engine with buy/sell logic and metabolic constants.
 pub mod engine;
 
+/// Caller-sized fills for the legacy multi-asset ghost wallet.
+pub mod ghost_fill;
+
 /// Trade log record type and JSONL append helper.
 pub mod log;
 
@@ -78,6 +81,7 @@ pub mod wallet;
 pub use engine::{CELLULAR_ATP, ENERGY_COMMITMENT, METABOLIC_COST, execute_buy, execute_sell};
 /// Re-export of the paper-accounting surface used by the parity harness.
 pub use error::LedgerError;
+pub use ghost_fill::{GhostFill, GhostFillError, apply_ghost_fill};
 /// Re-export of the trade log record type.
 pub use log::GhostTradeLog;
 pub use paper::{AcceptedFill, ApplyOutcome, NonFillEvent, NonFillKind, PaperLedger};

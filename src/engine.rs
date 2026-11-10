@@ -10,8 +10,8 @@
 //! the exact-fill accounting API. Accepted simulated fills go through
 //! [`crate::paper::PaperLedger`], which never reads ATP.
 
-use crate::log::{GhostTradeLog, append_ghost_log};
 use crate::wallet::GhostWallet;
+use crate::{GhostFill, Side, apply_ghost_fill};
 
 /// Initial biological energy currency (quote units).
 pub const CELLULAR_ATP: f32 = 500.0;
@@ -44,31 +44,17 @@ pub fn execute_buy(
     let net_spend = spend_usdt - fee;
     let qty = net_spend / price.max(1e-9);
 
-    wallet.apply_buy(asset, qty, net_spend);
-    wallet.balance_atp -= spend_usdt;
-    wallet.trade_count += 1;
-
-    let record = GhostTradeLog {
-        timestamp: chrono::Utc::now().to_rfc3339(),
-        step,
-        action: "buy".to_string(),
-        asset: asset.to_string(),
-        price_usd: price,
+    let fill = GhostFill {
+        asset,
+        side: Side::Buy,
+        price,
         quantity: qty,
-        trade_value_usdt: spend_usdt,
-        realized_pnl_usdt: -fee,
-        balance_atp: wallet.balance_atp,
-        cumulative_pnl: wallet.cumulative_pnl,
-        reason: reason.to_string(),
+        fee,
+        step,
+        reason,
     };
-
-    eprintln!(
-        "[ghost BUY ] step={:>5}  asset={:<6} qty={:.4} @ ${:.4}  fee=${:.4}",
-        step, asset, qty, price, fee
-    );
-
-    if let Some(path) = log_path {
-        append_ghost_log(&record, path);
+    if let Err(err) = apply_ghost_fill(wallet, fill, log_path) {
+        eprintln!("[ghost BUY rejected] {err}");
     }
 }
 
@@ -89,44 +75,19 @@ pub fn execute_sell(
         return;
     }
 
-    let entry_price = wallet.entry_price(asset);
     let proceeds = qty * price;
     let fee = proceeds * METABOLIC_COST;
-    let net_proceeds = proceeds - fee;
-    let pnl = (price - entry_price) * qty - fee;
-
-    wallet.apply_sell(asset, qty);
-    wallet.balance_atp += net_proceeds;
-    wallet.cumulative_pnl += pnl;
-    wallet.trade_count += 1;
-    if let Some(p) = wallet.realized_pnls.get_mut(asset) {
-        *p += pnl;
-    } else {
-        wallet.realized_pnls.insert(asset.to_string(), pnl);
-    }
-    wallet.record_pnl_and_update_kelly(pnl);
-
-    let record = GhostTradeLog {
-        timestamp: chrono::Utc::now().to_rfc3339(),
-        step,
-        action: "sell".to_string(),
-        asset: asset.to_string(),
-        price_usd: price,
+    let fill = GhostFill {
+        asset,
+        side: Side::Sell,
+        price,
         quantity: qty,
-        trade_value_usdt: proceeds,
-        realized_pnl_usdt: pnl,
-        balance_atp: wallet.balance_atp,
-        cumulative_pnl: wallet.cumulative_pnl,
-        reason: reason.to_string(),
+        fee,
+        step,
+        reason,
     };
-
-    eprintln!(
-        "[ghost SELL] step={:>5}  asset={:<6} qty={:.4} @ ${:.4}  PnL={:+.4}",
-        step, asset, qty, price, pnl
-    );
-
-    if let Some(path) = log_path {
-        append_ghost_log(&record, path);
+    if let Err(err) = apply_ghost_fill(wallet, fill, log_path) {
+        eprintln!("[ghost SELL rejected] {err}");
     }
 }
 

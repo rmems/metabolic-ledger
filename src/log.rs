@@ -24,18 +24,17 @@ pub struct GhostTradeLog {
 }
 
 /// Append one `GhostTradeLog` record to the given JSONL file path.
-pub fn append_ghost_log(record: &GhostTradeLog, path: &str) {
-    let Ok(line) = serde_json::to_string(record) else {
-        return;
-    };
-    if let Some(parent) = std::path::Path::new(path).parent() {
-        let _ = std::fs::create_dir_all(parent);
+pub fn append_ghost_log(record: &GhostTradeLog, path: &str) -> std::io::Result<()> {
+    let line = serde_json::to_string(record).map_err(std::io::Error::other)?;
+    if let Some(parent) = std::path::Path::new(path)
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent)?;
     }
-    if let Ok(mut f) = std::fs::OpenOptions::new()
+    let mut f = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(path)
-    {
-        let _ = writeln!(f, "{}", line);
-    }
+        .open(path)?;
+    writeln!(f, "{}", line)
 }
