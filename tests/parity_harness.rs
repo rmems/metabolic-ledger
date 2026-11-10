@@ -7,7 +7,7 @@ use metabolic_ledger::parity::{
     FixtureEvent, ParityFixture, load_fixture, run_fixture, shipped_fixture_dir,
 };
 use metabolic_ledger::{
-    AcceptedFill, ApplyOutcome, LedgerSnapshot, NonFillEvent, NonFillKind, PaperLedger, Scale, Side,
+    AcceptedFill, ApplyOutcome, Ledger, LedgerSnapshot, NonFillEvent, NonFillKind, Scale, Side,
 };
 use std::fs;
 
@@ -41,7 +41,7 @@ fn same_fixture_is_byte_stable_across_replays() {
     let fx = load_fixture(&path).unwrap();
     let mut snaps = Vec::new();
     for _ in 0..3 {
-        let mut book = PaperLedger::new(
+        let mut book = Ledger::new(
             &fx.units.instrument,
             scale_of(&fx),
             fx.initial.cash_subunits,
@@ -82,7 +82,7 @@ fn same_fixture_is_byte_stable_across_replays() {
 
 #[test]
 fn fees_and_qty_applied_once_including_duplicate_id() {
-    let mut book = PaperLedger::new("ASSET_A", Scale::CENTS_WHOLE_LOTS, 100_000).unwrap();
+    let mut book = Ledger::new("ASSET_A", Scale::CENTS_WHOLE_LOTS, 100_000).unwrap();
     let fill = AcceptedFill {
         fill_id: "once".into(),
         order_id: None,
@@ -114,7 +114,7 @@ fn realized_pnl_never_reads_atp_or_kelly() {
     let proposal = policy.propose_buy_spend(wallet.balance_atp);
     assert!((proposal - 0.99).abs() < 1e-6);
 
-    let mut book = PaperLedger::new("ASSET_A", Scale::CENTS_WHOLE_LOTS, 100_000).unwrap();
+    let mut book = Ledger::new("ASSET_A", Scale::CENTS_WHOLE_LOTS, 100_000).unwrap();
     book.apply_fill(AcceptedFill {
         fill_id: "econ".into(),
         order_id: None,
@@ -154,7 +154,7 @@ fn every_shipped_fixture_survives_snapshot_restore() {
         let json = book.snapshot_json(fx.mark_price_ticks).unwrap();
         let snap: LedgerSnapshot = serde_json::from_str(&json).unwrap();
         let mut restored =
-            PaperLedger::from_snapshot(snap).unwrap_or_else(|e| panic!("restore {}: {e}", fx.name));
+            Ledger::from_snapshot(snap).unwrap_or_else(|e| panic!("restore {}: {e}", fx.name));
         assert_eq!(
             restored.snapshot_json(fx.mark_price_ticks).unwrap(),
             json,
@@ -251,13 +251,9 @@ fn non_fill_step(kind: NonFillKind, event: &FixtureEvent) -> FixtureStep {
 /// `type_name`, for post-restore error checks).
 fn replay_fixture(
     fx: &ParityFixture,
-) -> (
-    PaperLedger,
-    Vec<AcceptedFill>,
-    Vec<(AcceptedFill, &'static str)>,
-) {
+) -> (Ledger, Vec<AcceptedFill>, Vec<(AcceptedFill, &'static str)>) {
     let mut book =
-        PaperLedger::new(&fx.units.instrument, scale_of(fx), fx.initial.cash_subunits).unwrap();
+        Ledger::new(&fx.units.instrument, scale_of(fx), fx.initial.cash_subunits).unwrap();
     let mut fills = Vec::new();
     let mut rejected = Vec::new();
     for event in &fx.events {
@@ -276,7 +272,7 @@ fn replay_fixture(
 
 /// A fill committed before the snapshot must replay idempotently after
 /// restore: one audit row, zero economic change.
-fn assert_replays_idempotently(book: &mut PaperLedger, fill: AcceptedFill, name: &str) {
+fn assert_replays_idempotently(book: &mut Ledger, fill: AcceptedFill, name: &str) {
     let before: LedgerSnapshot = book.snapshot(None).unwrap();
     assert_eq!(
         book.apply_fill(fill).unwrap(),

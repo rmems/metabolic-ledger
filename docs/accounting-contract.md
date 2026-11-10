@@ -1,11 +1,11 @@
-# Paper accounting contract (RM-1863)
+# Deterministic accounting contract (RM-1863)
 
 This crate now exposes two layers:
 
 | Layer | Types | Role |
 | --- | --- | --- |
-| **Economic accounting** | `PaperLedger`, `AcceptedFill` | Apply an already-decided simulated fill exactly once |
-| **ATP / Kelly policy** | `AtpPolicy`, `execute_buy` / `execute_sell`, `GhostWallet` | Experimental energy sizing. **Realized PnL on `PaperLedger` never reads this state.** |
+| **Economic accounting** | `Ledger`, `AcceptedFill` | Apply an already-decided fill exactly once |
+| **ATP / Kelly policy** | `AtpPolicy`, `execute_buy` / `execute_sell`, `GhostWallet` | Experimental energy sizing. **Realized PnL on `Ledger` never reads this state.** |
 
 Legacy `execute_buy` / `execute_sell` still size from ATP × Kelly and write `f32` ghost logs. They are not the parity path. Do not treat `METABOLIC_COST` as an exchange fee.
 
@@ -20,19 +20,19 @@ the deterministic integer parity contract below; the v1 fixtures are unchanged.
 
 ## Supported subset (M2)
 
-- **One instrument** per `PaperLedger`. A different symbol is `instrument_mismatch`.
+- **One instrument** per `Ledger`. A different symbol is `instrument_mismatch`.
 - **Long or flat only.** `inventory_lots >= 0`. Buys open or add. Sells reduce or close.
 - **Sells may not exceed inventory.** That case is `unsupported_short` (same error as a sell from flat). Nothing is clamped to flatten.
 - **No shorts and no multi-instrument books.** A short or oversell is `unsupported_short`. A fill or non-fill for any symbol other than the configured one is `instrument_mismatch`. There is no separate multi-instrument error.
 - **No derivatives.** They cannot be expressed: `AcceptedFill` has no contract type, leverage, margin, expiry, or funding field, so there is nothing to reject at runtime. Every fill is treated as a spot fill of the configured instrument.
 - `unsupported_subset` (`LedgerError::UnsupportedSubset`) is a reserved error type. No code path returns it at this revision. It stays in the enum and in the `type_name()` contract so a later schema can use it without renaming.
-- **Paper only.** No venue, credentials, or network I/O.
+- **Accounting only.** No venue, credentials, or network I/O. Callers supply accepted fills; their execution mode is outside this crate.
 
 Anything outside the subset is rejected. Failed calls leave cash, inventory, cost, realized PnL, and previously committed audit rows unchanged.
 
 ## Units
 
-Integer only. No `f32`/`f64` on the paper path.
+Integer only. No `f32`/`f64` on the accounting path.
 
 | Quantity | Type | Meaning |
 | --- | --- | --- |
@@ -74,9 +74,9 @@ floor((total_cost_subunits * qty_scale) / inventory_lots)
 
 when long, else `0`. Floor is Euclidean, so a negative cost from a large buy rebate rounds down. With `qty_scale = 1` this is `floor(total_cost / inventory)`. Fixtures that need an exact basis should assert `total_cost_subunits` as well.
 
-The product is computed in `i128`. If the floored result does not fit in `i64`, `PaperLedger::checked_weighted_cost_basis_ticks()` returns `out_of_range`. It never saturates to `i64::MIN` / `i64::MAX`. `snapshot`, `snapshot_json`, and the parity harness use the checked value, so an unrepresentable basis fails the snapshot (and the fixture) instead of comparing a clamped number. Ledger state is not changed by this failure; the fill that produced the cost has already been committed under the normal checked arithmetic.
+The product is computed in `i128`. If the floored result does not fit in `i64`, `Ledger::checked_weighted_cost_basis_ticks()` returns `out_of_range`. It never saturates to `i64::MIN` / `i64::MAX`. `snapshot`, `snapshot_json`, and the parity harness use the checked value, so an unrepresentable basis fails the snapshot (and the fixture) instead of comparing a clamped number. Ledger state is not changed by this failure; the fill that produced the cost has already been committed under the normal checked arithmetic.
 
-`AtpPolicy::energy_commitment` is the fraction used by `propose_buy_spend` and `propose_sell_qty`. Those helpers do not read the wallet Kelly fraction, and `PaperLedger` does not apply them.
+`AtpPolicy::energy_commitment` is the fraction used by `propose_buy_spend` and `propose_sell_qty`. Those helpers do not read the wallet Kelly fraction, and `Ledger` does not apply them.
 
 Unrealized / mark-to-market is **not** ledger state. Callers pass an external `mark_price_ticks`:
 
@@ -97,9 +97,9 @@ unrealized = notional(mark, inventory) - total_cost
 
 ## Restart and restore (RM-2471)
 
-Persist the complete `LedgerSnapshot` returned by `PaperLedger::snapshot` (or the
-JSON from `snapshot_json`). Deserialize JSON as `paper::LedgerSnapshot` and pass
-it to `PaperLedger::from_snapshot`, which takes the snapshot by value: it is
+Persist the complete `LedgerSnapshot` returned by `Ledger::snapshot` (or the
+JSON from `snapshot_json`). Deserialize JSON as `ledger::LedgerSnapshot` and pass
+it to `Ledger::from_snapshot`, which takes the snapshot by value: it is
 consumed whether the restore succeeds or fails, so keep your own copy if you
 need it afterwards. No snapshot fields or parity-v1 formats change;
 existing snapshots with their complete audit are supported.
@@ -130,7 +130,7 @@ restored as state. Supply a mark again when taking a new snapshot.
 
 ## ATP separation
 
-`AtpPolicy::propose_buy_spend` and `propose_sell_qty` size from `energy_commitment` and the balances the caller passes. `PaperLedger::apply_fill` takes the accepted quantity as given and has no `GhostWallet` / ATP field. Changing ATP or `energy_commitment` after a fill cannot change committed realized PnL.
+`AtpPolicy::propose_buy_spend` and `propose_sell_qty` size from `energy_commitment` and the balances the caller passes. `Ledger::apply_fill` takes the accepted quantity as given and has no `GhostWallet` / ATP field. Changing ATP or `energy_commitment` after a fill cannot change committed realized PnL.
 
 ## Golden fixtures
 
