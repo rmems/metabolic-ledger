@@ -26,10 +26,10 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AcceptedFill {
     pub fill_id: String,
-    /// Caller-supplied order identity; absent on legacy fills.
+    /// Caller-supplied order identity; non-empty when present, absent on legacy fills.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub order_id: Option<String>,
-    /// Caller-supplied decision identity; absent on legacy fills.
+    /// Caller-supplied decision identity; non-empty when present, absent on legacy fills.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decision_id: Option<String>,
     /// Injected event time (nanoseconds). Not wall clock.
@@ -322,6 +322,16 @@ impl PaperLedger {
             return Err(LedgerError::MalformedInput {
                 reason: "fill_id must be non-empty".into(),
             });
+        }
+        for (name, id) in [
+            ("order_id", &fill.order_id),
+            ("decision_id", &fill.decision_id),
+        ] {
+            if id.as_deref() == Some("") {
+                return Err(LedgerError::MalformedInput {
+                    reason: format!("{name} must be non-empty when provided"),
+                });
+            }
         }
         self.check_instrument(&fill.instrument)?;
         let _ = self

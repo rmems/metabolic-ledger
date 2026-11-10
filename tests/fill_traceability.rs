@@ -86,6 +86,39 @@ fn changing_adding_or_removing_either_identity_conflicts_without_mutation() {
 }
 
 #[test]
+fn empty_optional_identities_are_rejected_before_commit_or_duplicate_detection() {
+    for field in ["order_id", "decision_id"] {
+        for already_applied in [false, true] {
+            let mut input = legacy_fill();
+            input["order_id"] = json!("order-1");
+            input["decision_id"] = json!("decision-1");
+            let valid: AcceptedFill = serde_json::from_value(input.clone()).unwrap();
+            let mut book = book();
+            if already_applied {
+                book.apply_fill(valid.clone()).unwrap();
+            }
+            let snapshot = book.snapshot_json(None).unwrap();
+            input[field] = json!("");
+            assert_eq!(
+                book.apply_fill(serde_json::from_value(input).unwrap()),
+                Err(LedgerError::MalformedInput {
+                    reason: format!("{field} must be non-empty when provided"),
+                }),
+                "{field}, already_applied={already_applied}"
+            );
+            assert_eq!(book.snapshot_json(None).unwrap(), snapshot);
+            // A rejected call must neither reserve nor replace the fingerprint.
+            let expected = if already_applied {
+                ApplyOutcome::IdempotentReplay
+            } else {
+                ApplyOutcome::Applied
+            };
+            assert_eq!(book.apply_fill(valid).unwrap(), expected);
+        }
+    }
+}
+
+#[test]
 fn legacy_fill_and_audit_json_keep_their_shape() {
     let legacy = legacy_fill();
     let fill: AcceptedFill = serde_json::from_value(legacy.clone()).unwrap();

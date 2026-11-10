@@ -79,6 +79,7 @@ unrealized = notional(mark, inventory) - total_cost
 
 - `fill_id` is the stable fill identity (non-empty string).
 - `AcceptedFill` accepts caller-supplied `order_id` and `decision_id` as independent `Option<String>` values. The ledger preserves them verbatim on both committed fill audit rows and idempotent replay rows; it does not infer or mint either identity.
+- When provided, either optional identity must be non-empty. `Some("")` is `malformed_input`, checked before duplicate detection or mutation; `None` remains valid. IDs are not trimmed or normalized.
 - Both optional identities are part of the fill payload for duplicate detection. Changing, adding, or removing either on the same `fill_id` is `duplicate_fill_conflict`, with no state or audit mutation.
 - Missing or JSON `null` identities deserialize as `None`. With no identities, fills retain the legacy behavior: audit `order_id` is `null` and `decision_id` is omitted. Non-fill rows retain their existing order identity and have no decision identity.
 - `event_time_ns` is injected by the caller. The ledger does not call `Utc::now()`.
