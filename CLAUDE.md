@@ -68,7 +68,7 @@ src/
   policy.rs   AtpPolicy (experimental sizing proposals; not accounting)
   wallet.rs   GhostWallet, MarketPrices, PortfolioSummary (f32, adaptive Kelly)
   engine.rs   CELLULAR_ATP / ENERGY_COMMITMENT / METABOLIC_COST, execute_buy / execute_sell (legacy)
-  log.rs      GhostTradeLog + JSONL append (legacy path)
+  log.rs      GhostTradeLog + deprecated best-effort JSONL append (diagnostics, not audit)
 tests/
   parity_harness.rs  replays every fixtures/v1/*.json; byte-stability; fee-once; ATP independence
 fixtures/v1/   hand-verified golden files (buy, partial/full close, rebate, duplicate fill,

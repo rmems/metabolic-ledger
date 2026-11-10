@@ -7,7 +7,11 @@
 use serde::Serialize;
 use std::io::Write as _;
 
-/// One ghost trade record, appended as a JSONL line.
+/// Legacy ghost-trade diagnostic data, serialized as a JSONL line.
+///
+/// The deprecated [`append_ghost_log`] writer is best-effort and can silently
+/// lose records. This type is not a reliable accounting or audit record.
+/// Use [`crate::audit::AuditRecord`] from [`crate::paper::PaperLedger`] instead.
 #[derive(Debug, Serialize)]
 pub struct GhostTradeLog {
     pub timestamp: String,
@@ -23,7 +27,28 @@ pub struct GhostTradeLog {
     pub reason: String,
 }
 
-/// Append one `GhostTradeLog` record to the given JSONL file path.
+/// Best-effort append of legacy diagnostic data, **not an audit record**.
+///
+/// Serialization, directory creation, file opening, and write failures are
+/// silently ignored. A return from this function does not confirm a write,
+/// and the output may be incomplete or contain a partial line.
+/// The legacy engine retains this behavior only for compatibility.
+///
+/// Use [`crate::paper::PaperLedger`] and its [`crate::audit::AuditRecord`] rows
+/// for accounting. Callers must persist those rows and handle storage errors;
+/// the paper ledger does not write a durable log itself.
+///
+/// ```compile_fail
+/// #![deny(deprecated)]
+/// use metabolic_ledger::log::{GhostTradeLog, append_ghost_log};
+///
+/// fn write_legacy(record: &GhostTradeLog) {
+///     append_ghost_log(record, "trades.jsonl");
+/// }
+/// ```
+#[deprecated(
+    note = "Best-effort diagnostics only; failures are silently ignored. Use PaperLedger/AuditRecord and handle persistence errors."
+)]
 pub fn append_ghost_log(record: &GhostTradeLog, path: &str) {
     let Ok(line) = serde_json::to_string(record) else {
         return;

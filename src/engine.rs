@@ -9,8 +9,12 @@
 //! [`execute_buy`] and [`execute_sell`] size from ATP and Kelly. They are not
 //! the exact-fill accounting API. Accepted simulated fills go through
 //! [`crate::paper::PaperLedger`], which never reads ATP.
+//!
+//! `log_path` enables only the deprecated, best-effort ghost log. Its failures
+//! are silently ignored and do not roll back trades. It is not an audit record;
+//! use `PaperLedger` / `AuditRecord` and handle persistence errors separately.
 
-use crate::log::{GhostTradeLog, append_ghost_log};
+use crate::log::GhostTradeLog;
 use crate::wallet::GhostWallet;
 
 /// Initial biological energy currency (quote units).
@@ -27,6 +31,9 @@ pub const METABOLIC_COST: f32 = 0.001;
 /// Spends `wallet.kelly_fraction() * wallet.balance_atp` ATP (validated always-valid
 /// fraction) after deducting the metabolic cost, then updates the weighted-average
 /// cost basis.
+///
+/// `log_path` is deprecated best-effort diagnostic output, not a reliable record.
+/// Logging failures are silently ignored; wallet changes are not rolled back.
 pub fn execute_buy(
     wallet: &mut GhostWallet,
     asset: &str,
@@ -68,7 +75,11 @@ pub fn execute_buy(
     );
 
     if let Some(path) = log_path {
-        append_ghost_log(&record, path);
+        #[allow(
+            deprecated,
+            reason = "Legacy diagnostic output retained for compatibility"
+        )]
+        crate::log::append_ghost_log(&record, path);
     }
 }
 
@@ -76,6 +87,9 @@ pub fn execute_buy(
 ///
 /// Sells `wallet.kelly_fraction() * balance[asset]` units (validated always-valid
 /// fraction), deducting metabolic cost.
+///
+/// `log_path` is deprecated best-effort diagnostic output, not a reliable record.
+/// Logging failures are silently ignored; wallet changes are not rolled back.
 pub fn execute_sell(
     wallet: &mut GhostWallet,
     asset: &str,
@@ -126,7 +140,11 @@ pub fn execute_sell(
     );
 
     if let Some(path) = log_path {
-        append_ghost_log(&record, path);
+        #[allow(
+            deprecated,
+            reason = "Legacy diagnostic output retained for compatibility"
+        )]
+        crate::log::append_ghost_log(&record, path);
     }
 }
 

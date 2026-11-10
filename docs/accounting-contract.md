@@ -9,6 +9,21 @@ This crate now exposes two layers:
 
 Legacy `execute_buy` / `execute_sell` still size from ATP × Kelly and write `f32` ghost logs. They are not the parity path. Do not treat `METABOLIC_COST` as an exchange fee.
 
+## Deprecated ghost log (RM-2472)
+
+`log::append_ghost_log` and the legacy engine's `log_path` output are deprecated
+as an accounting record. `GhostTradeLog` is best-effort diagnostic data only,
+not a reliable ledger or audit trail. Serialization, directory creation, file
+opening, and write failures are silently ignored. Returning `()` does not
+confirm a write; records may be missing or partially written. Logging failure
+does not stop or roll back a legacy trade. Do not reconstruct authoritative
+balances, PnL, or win rates from this stream.
+
+Use `PaperLedger` and its `AuditRecord` rows for economic accounting. These rows
+are held in memory, not automatically persisted: the consuming application must
+persist them and handle storage errors explicitly. Deprecating the ghost log
+does not give the paper path a disk-durability guarantee.
+
 ## Supported subset (M2)
 
 - **One instrument** per `PaperLedger`. A different symbol is `instrument_mismatch`.

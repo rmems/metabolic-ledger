@@ -14,7 +14,10 @@
 //! - **Energy commitment** (8% per signal) — fraction risked per trade
 //! - **Metabolic cost** (0.1% per action) — friction / spread simulation
 //!
-//! All trades are logged to JSONL for SNN training data and performance analysis.
+//! Legacy trades can optionally emit deprecated, best-effort JSONL diagnostics.
+//! Logging failures are silently ignored; this output is not an audit record.
+//! Use [`paper::PaperLedger`] / [`audit::AuditRecord`] for accounting and handle
+//! persistence errors in the consuming application.
 //!
 //! ## Paper accounting (RM-1863)
 //!
@@ -52,7 +55,7 @@ pub mod error;
 /// Ghost trade execution engine with buy/sell logic and metabolic constants.
 pub mod engine;
 
-/// Trade log record type and JSONL append helper.
+/// Legacy diagnostic data and deprecated, best-effort JSONL writer (not an audit log).
 pub mod log;
 
 /// Versioned golden-fixture schema and replay harness.
