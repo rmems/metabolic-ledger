@@ -78,6 +78,10 @@ unrealized = notional(mark, inventory) - total_cost
 ## Fill identity and time
 
 - `fill_id` is the stable fill identity (non-empty string).
+- `AcceptedFill` accepts caller-supplied `order_id` and `decision_id` as independent `Option<String>` values. The ledger preserves them verbatim on both committed fill audit rows and idempotent replay rows; it does not infer or mint either identity.
+- When provided, either optional identity must be non-empty. `Some("")` is `malformed_input`, checked before duplicate detection or mutation; `None` remains valid. IDs are not trimmed or normalized.
+- Both optional identities are part of the fill payload for duplicate detection. Changing, adding, or removing either on the same `fill_id` is `duplicate_fill_conflict`, with no state or audit mutation.
+- Missing or JSON `null` identities deserialize as `None`. With no identities, fills retain the legacy behavior: audit `order_id` is `null` and `decision_id` is omitted. Non-fill rows retain their existing order identity and have no decision identity.
 - `event_time_ns` is injected by the caller. The ledger does not call `Utc::now()`.
 - Same `fill_id` + same payload → `ApplyOutcome::IdempotentReplay` (no second debit; an audit row with `idempotent_replay = true`).
 - Same `fill_id` + different payload → `duplicate_fill_conflict`.
@@ -99,7 +103,8 @@ Directory: `fixtures/v1/`. Hand-verified files ship now. Do not change DendriteT
 Versioning rules:
 
 - **Existing v1 fixture files are immutable.** Do not edit, rename, or delete a shipped `fixtures/v1/*.json` file to make a test pass, and do not relax its expected values or tolerances.
-- **Additional v1 fixtures are allowed only when they keep v1 semantics.** A new file may go into `fixtures/v1/` (for example a DendriteTrader.jl (RM-1864) emission, or a new hand-verified case) only if it uses schema `metabolic-ledger.parity.v1` / `schema_version: 1` exactly as written here, uses only the v1 fields and event kinds, and every existing v1 fixture still passes unchanged.
+- **Additional v1 fixtures are allowed only when they keep v1 semantics.** A new file may go into `fixtures/v1/` (for example a DendriteTrader.jl (RM-1864) emission, or a new hand-verified case) only if it uses schema `metabolic-ledger.parity.v1` / `schema_version: 1` exactly as written here, uses only the v1 fields and event kinds (including the additive traceability extension below), and every existing v1 fixture still passes unchanged.
+- **Additive traceability extension (RM-2470).** Fill inputs may optionally carry `order_id` and `decision_id`; audit rows may optionally carry `decision_id` alongside the existing `order_id` slot. New fields default to `None` when missing and are omitted when `None` during serialization. The existing audit `order_id` slot is still serialized, including `null`. Thus legacy fill inputs and audit rows retain their serialized field shape and order, all shipped v1 fixtures remain unchanged, and no accounting semantics change. This backwards-compatible extension stays in v1; removing or reinterpreting fields still requires a new version.
 - **A semantic change needs a new schema version and directory.** Any change to units, sign rules, rounding, cost-basis or PnL formulas, error types, event kinds, audit row shape, or what a field means goes into a new schema id and version (for example `metabolic-ledger.parity.v2` in `fixtures/v2/`). `load_fixture` rejects any schema id or version it does not know, so a v2 file cannot be silently replayed under v1 rules.
 
 Integer path tolerance is `0`. The `tolerances` object exists so a later Julia float oracle can declare a nonzero epsilon without changing the schema id; this crate’s shipped fixtures keep zeros.

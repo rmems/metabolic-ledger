@@ -67,6 +67,10 @@ pub struct FixtureInitial {
 pub enum FixtureEvent {
     Fill {
         fill_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        order_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        decision_id: Option<String>,
         event_time_ns: u64,
         instrument: String,
         side: Side,
@@ -204,6 +208,8 @@ fn apply_event(book: &mut PaperLedger, event: &FixtureEvent) -> Result<ApplyOutc
     match event {
         FixtureEvent::Fill {
             fill_id,
+            order_id,
+            decision_id,
             event_time_ns,
             instrument,
             side,
@@ -212,6 +218,8 @@ fn apply_event(book: &mut PaperLedger, event: &FixtureEvent) -> Result<ApplyOutc
             fee_subunits,
         } => book.apply_fill(AcceptedFill {
             fill_id: fill_id.clone(),
+            order_id: order_id.clone(),
+            decision_id: decision_id.clone(),
             event_time_ns: *event_time_ns,
             instrument: instrument.clone(),
             side: *side,

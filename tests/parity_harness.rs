@@ -46,6 +46,8 @@ fn same_fixture_is_byte_stable_across_replays() {
         for event in &fx.events {
             if let metabolic_ledger::parity::FixtureEvent::Fill {
                 fill_id,
+                order_id,
+                decision_id,
                 event_time_ns,
                 instrument,
                 side,
@@ -56,6 +58,8 @@ fn same_fixture_is_byte_stable_across_replays() {
             {
                 book.apply_fill(AcceptedFill {
                     fill_id: fill_id.clone(),
+                    order_id: order_id.clone(),
+                    decision_id: decision_id.clone(),
                     event_time_ns: *event_time_ns,
                     instrument: instrument.clone(),
                     side: *side,
@@ -77,6 +81,8 @@ fn fees_and_qty_applied_once_including_duplicate_id() {
     let mut book = PaperLedger::new("ASSET_A", Scale::CENTS_WHOLE_LOTS, 100_000).unwrap();
     let fill = AcceptedFill {
         fill_id: "once".into(),
+        order_id: None,
+        decision_id: None,
         event_time_ns: 1,
         instrument: "ASSET_A".into(),
         side: Side::Buy,
@@ -107,6 +113,8 @@ fn realized_pnl_never_reads_atp_or_kelly() {
     let mut book = PaperLedger::new("ASSET_A", Scale::CENTS_WHOLE_LOTS, 100_000).unwrap();
     book.apply_fill(AcceptedFill {
         fill_id: "econ".into(),
+        order_id: None,
+        decision_id: None,
         event_time_ns: 1,
         instrument: "ASSET_A".into(),
         side: Side::Buy,
@@ -117,6 +125,8 @@ fn realized_pnl_never_reads_atp_or_kelly() {
     .unwrap();
     book.apply_fill(AcceptedFill {
         fill_id: "econ-sell".into(),
+        order_id: None,
+        decision_id: None,
         event_time_ns: 2,
         instrument: "ASSET_A".into(),
         side: Side::Sell,
