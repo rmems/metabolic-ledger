@@ -637,32 +637,37 @@ mod tests {
         Ledger::new("ASSET_A", Scale::CENTS_WHOLE_LOTS, 100_000).unwrap()
     }
 
-    fn buy(id: &str, t: u64, px: i64, qty: i64, fee: i64) -> AcceptedFill {
+    /// `terms` is `(price_ticks, qty_lots, fee_subunits)`.
+    fn buy(id: &str, t: u64, terms: (i64, i64, i64)) -> AcceptedFill {
+        fill(Side::Buy, id, t, terms)
+    }
+
+    fn sell(id: &str, t: u64, terms: (i64, i64, i64)) -> AcceptedFill {
+        fill(Side::Sell, id, t, terms)
+    }
+
+    fn fill(side: Side, id: &str, t: u64, (px, qty, fee): (i64, i64, i64)) -> AcceptedFill {
         AcceptedFill {
             fill_id: id.into(),
             order_id: None,
             decision_id: None,
             event_time_ns: t,
             instrument: "ASSET_A".into(),
-            side: Side::Buy,
+            side,
             price_ticks: px,
             qty_lots: qty,
             fee_subunits: fee,
         }
     }
 
-    fn sell(id: &str, t: u64, px: i64, qty: i64, fee: i64) -> AcceptedFill {
-        AcceptedFill {
-            fill_id: id.into(),
-            order_id: None,
-            decision_id: None,
-            event_time_ns: t,
-            instrument: "ASSET_A".into(),
-            side: Side::Sell,
-            price_ticks: px,
-            qty_lots: qty,
-            fee_subunits: fee,
-        }
+    /// Assert committed economics as `(cash, inventory, total_cost, realized_pnl, fees)`.
+    fn assert_state(book: &Ledger, state: (i64, i64, i64, i64, i64)) {
+        let (cash, inventory, total_cost, realized_pnl, fees) = state;
+        assert_eq!(book.cash_subunits(), cash);
+        assert_eq!(book.inventory_lots(), inventory);
+        assert_eq!(book.total_cost_subunits(), total_cost);
+        assert_eq!(book.realized_pnl_subunits(), realized_pnl);
+        assert_eq!(book.fees_subunits(), fees);
     }
 
     /// An idempotent replay appends exactly one row and changes no economics.
@@ -680,35 +685,25 @@ mod tests {
     #[test]
     fn buy_partial_full_close_matches_hand_math() {
         let mut book = ledger();
-        book.apply_fill(buy("f1", 1, 1000, 10, 5)).unwrap();
-        assert_eq!(book.cash_subunits(), 89_995);
-        assert_eq!(book.inventory_lots(), 10);
-        assert_eq!(book.total_cost_subunits(), 10_005);
-        assert_eq!(book.realized_pnl_subunits(), 0);
+        book.apply_fill(buy("f1", 1, (1000, 10, 5))).unwrap();
+        assert_state(&book, (89_995, 10, 10_005, 0, 5));
 
-        book.apply_fill(sell("f2", 2, 1100, 4, 4)).unwrap();
-        assert_eq!(book.cash_subunits(), 94_391);
-        assert_eq!(book.inventory_lots(), 6);
-        assert_eq!(book.total_cost_subunits(), 6_003);
-        assert_eq!(book.realized_pnl_subunits(), 394);
+        book.apply_fill(sell("f2", 2, (1100, 4, 4))).unwrap();
+        assert_state(&book, (94_391, 6, 6_003, 394, 9));
 
-        book.apply_fill(sell("f3", 3, 1100, 6, 6)).unwrap();
-        assert_eq!(book.cash_subunits(), 100_985);
-        assert_eq!(book.inventory_lots(), 0);
-        assert_eq!(book.total_cost_subunits(), 0);
-        assert_eq!(book.realized_pnl_subunits(), 985);
-        assert_eq!(book.fees_subunits(), 15);
+        book.apply_fill(sell("f3", 3, (1100, 6, 6))).unwrap();
+        assert_state(&book, (100_985, 0, 0, 985, 15));
     }
 
     #[test]
     fn short_and_over_sell_are_typed_errors() {
         let mut book = ledger();
-        let err = book.apply_fill(sell("s1", 1, 1000, 1, 0)).unwrap_err();
+        let err = book.apply_fill(sell("s1", 1, (1000, 1, 0))).unwrap_err();
         assert_eq!(err.type_name(), "unsupported_short");
         assert_eq!(book.cash_subunits(), 100_000);
 
-        book.apply_fill(buy("b1", 2, 1000, 2, 0)).unwrap();
-        let err = book.apply_fill(sell("s2", 3, 1000, 3, 0)).unwrap_err();
+        book.apply_fill(buy("b1", 2, (1000, 2, 0))).unwrap();
+        let err = book.apply_fill(sell("s2", 3, (1000, 3, 0))).unwrap_err();
         assert!(matches!(
             err,
             LedgerError::UnsupportedShort {
@@ -723,17 +718,16 @@ mod tests {
     #[test]
     fn duplicate_fill_is_idempotent_not_a_second_debit() {
         let mut book = ledger();
-        let f = buy("dup", 10, 1000, 10, 5);
+        let f = buy("dup", 10, (1000, 10, 5));
         assert_eq!(book.apply_fill(f.clone()).unwrap(), ApplyOutcome::Applied);
         assert_eq!(book.apply_fill(f).unwrap(), ApplyOutcome::IdempotentReplay);
-        assert_eq!(book.cash_subunits(), 89_995);
-        assert_eq!(book.fees_subunits(), 5);
+        assert_state(&book, (89_995, 10, 10_005, 0, 5));
         assert_eq!(
             book.audit().iter().filter(|r| r.idempotent_replay).count(),
             1
         );
 
-        let mut conflict = buy("dup", 10, 1000, 10, 5);
+        let mut conflict = buy("dup", 10, (1000, 10, 5));
         conflict.fee_subunits = 6;
         assert!(matches!(
             book.apply_fill(conflict),
@@ -769,9 +763,7 @@ mod tests {
             reason: "passive_resting".into(),
         })
         .unwrap();
-        assert_eq!(book.realized_pnl_subunits(), 0);
-        assert_eq!(book.cash_subunits(), 100_000);
-        assert_eq!(book.inventory_lots(), 0);
+        assert_state(&book, (100_000, 0, 0, 0, 0));
         assert_eq!(book.audit().len(), 3);
         assert!(book.audit().iter().all(|r| r.realized_pnl_delta == 0));
     }
@@ -779,7 +771,7 @@ mod tests {
     #[test]
     fn snapshot_is_byte_stable() {
         let mut book = ledger();
-        book.apply_fill(buy("f1", 1, 1000, 10, 5)).unwrap();
+        book.apply_fill(buy("f1", 1, (1000, 10, 5))).unwrap();
         let a = book.snapshot_json(Some(1100)).unwrap();
         let b = book.snapshot_json(Some(1100)).unwrap();
         assert_eq!(a, b);
@@ -791,7 +783,7 @@ mod tests {
     fn failed_validation_does_not_mutate() {
         let mut book = ledger();
         let before = book.snapshot_json(None).unwrap();
-        let mut bad = buy("x", 1, 1000, 1, 0);
+        let mut bad = buy("x", 1, (1000, 1, 0));
         bad.instrument = "OTHER".into();
         assert!(book.apply_fill(bad).is_err());
         assert_eq!(book.snapshot_json(None).unwrap(), before);
@@ -827,7 +819,7 @@ mod tests {
     #[test]
     fn negative_cost_basis_floors() {
         let mut book = ledger();
-        book.apply_fill(buy("neg", 1, 1, 2, -3)).unwrap();
+        book.apply_fill(buy("neg", 1, (1, 2, -3))).unwrap();
         assert_eq!(book.total_cost_subunits(), -1);
         assert_eq!(book.checked_weighted_cost_basis_ticks(), Ok(-1));
     }
@@ -845,7 +837,7 @@ mod tests {
             100_000,
         )
         .unwrap();
-        book.apply_fill(buy("huge", 1, 2, 1, fee)).unwrap();
+        book.apply_fill(buy("huge", 1, (2, 1, fee))).unwrap();
         book
     }
 
@@ -883,19 +875,15 @@ mod tests {
     #[test]
     fn buy_rebate_larger_than_notional_increases_cash() {
         let mut book = ledger();
-        book.apply_fill(buy("rebate-over", 1, 1000, 10, -15_000))
+        book.apply_fill(buy("rebate-over", 1, (1000, 10, -15_000)))
             .unwrap();
-        assert_eq!(book.cash_subunits(), 105_000);
-        assert_eq!(book.inventory_lots(), 10);
-        assert_eq!(book.total_cost_subunits(), -5_000);
-        assert_eq!(book.fees_subunits(), -15_000);
-        assert_eq!(book.realized_pnl_subunits(), 0);
+        assert_state(&book, (105_000, 10, -5_000, 0, -15_000));
     }
 
     #[test]
     fn restored_ledger_replays_already_applied_fill() {
         let mut book = ledger();
-        let mut first = buy("r1", 1, 1000, 10, 5);
+        let mut first = buy("r1", 1, (1000, 10, 5));
         first.order_id = Some("ord-1".into());
         first.decision_id = Some("dec-1".into());
         book.apply_fill(first.clone()).unwrap();
@@ -907,7 +895,7 @@ mod tests {
             reason: "user_cancel".into(),
         })
         .unwrap();
-        book.apply_fill(sell("r2", 3, 1100, 4, 4)).unwrap();
+        book.apply_fill(sell("r2", 3, (1100, 4, 4))).unwrap();
 
         let json = book.snapshot_json(Some(1200)).unwrap();
         let snap: LedgerSnapshot = serde_json::from_str(&json).unwrap();
@@ -928,7 +916,7 @@ mod tests {
         assert_replay_only_appends_row(&before, restored.snapshot(None).unwrap());
         assert_eq!(restored.snapshot_json(None), book.snapshot_json(None));
 
-        let conflict = sell("r2", 3, 1100, 4, 5);
+        let conflict = sell("r2", 3, (1100, 4, 5));
         let pre_conflict = restored.snapshot_json(None).unwrap();
         assert!(matches!(
             restored.apply_fill(conflict),
@@ -940,9 +928,9 @@ mod tests {
     #[test]
     fn new_fill_after_restore_applies_normally() {
         let mut book = ledger();
-        book.apply_fill(buy("n1", 1, 1000, 10, 5)).unwrap();
+        book.apply_fill(buy("n1", 1, (1000, 10, 5))).unwrap();
         let mut restored = Ledger::from_snapshot(book.snapshot(None).unwrap()).unwrap();
-        let next = sell("n2", 2, 1100, 4, 4);
+        let next = sell("n2", 2, (1100, 4, 4));
         assert_eq!(
             restored.apply_fill(next.clone()).unwrap(),
             ApplyOutcome::Applied
@@ -973,8 +961,8 @@ mod tests {
     #[test]
     fn restore_rejects_inconsistent_or_pruned_snapshots() {
         let mut book = ledger();
-        book.apply_fill(buy("p1", 1, 1000, 10, 5)).unwrap();
-        book.apply_fill(buy("p2", 2, 1000, 1, 0)).unwrap();
+        book.apply_fill(buy("p1", 1, (1000, 10, 5))).unwrap();
+        book.apply_fill(buy("p2", 2, (1000, 1, 0))).unwrap();
         let good = book.snapshot(None).unwrap();
 
         let mut pruned = good.clone();
