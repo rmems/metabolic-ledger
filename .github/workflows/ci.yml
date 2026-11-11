@@ -32,13 +32,13 @@ jobs:
       - if: matrix.os != 'ubuntu-latest'
         run: cargo test --all-features
       - if: matrix.os == 'ubuntu-latest'
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
         with:
           tool: cargo-llvm-cov
       - if: matrix.os == 'ubuntu-latest'
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info
       - if: matrix.os == 'ubuntu-latest' && github.event.pull_request.head.repo.fork != true
-        uses: qltysh/qlty-action/coverage@v2
+        uses: qltysh/qlty-action/coverage@ebcd284bf32e36a030afe15f1e136c7be08b9506 # v2
         with:
           oidc: true
           files: lcov.info
