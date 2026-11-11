@@ -7,15 +7,16 @@
 //! Ghost trade execution engine (legacy ATP / Kelly **policy** path).
 //!
 //! [`execute_buy`] and [`execute_sell`] size from ATP and Kelly. They are not
-//! the exact-fill accounting API. Accepted simulated fills go through
-//! [`crate::paper::PaperLedger`], which never reads ATP.
+//! the exact-fill accounting API. Accepted fills go through
+//! [`crate::ledger::Ledger`], which never reads ATP.
 //!
-//! `log_path` enables only the deprecated, best-effort ghost log. Its failures
-//! are silently ignored and do not roll back trades. It is not an audit record;
-//! use `PaperLedger` / `AuditRecord` and handle persistence errors separately.
+//! `log_path` enables only the deprecated, best-effort ghost log. Its errors
+//! are returned and reject the fill before any wallet commit, but a failed
+//! write can still leave a partial line. It is not an audit record;
+//! use `Ledger` / `AuditRecord` and handle persistence errors separately.
 
-use crate::log::GhostTradeLog;
 use crate::wallet::GhostWallet;
+use crate::{GhostFill, Side, apply_ghost_fill};
 
 /// Initial biological energy currency (quote units).
 pub const CELLULAR_ATP: f32 = 500.0;
@@ -32,8 +33,8 @@ pub const METABOLIC_COST: f32 = 0.001;
 /// fraction) after deducting the metabolic cost, then updates the weighted-average
 /// cost basis.
 ///
-/// `log_path` is deprecated best-effort diagnostic output, not a reliable record.
-/// Logging failures are silently ignored; wallet changes are not rolled back.
+/// `log_path` is deprecated best-effort diagnostic output, not a reliable
+/// record. A log write failure rejects the fill before any wallet commit.
 pub fn execute_buy(
     wallet: &mut GhostWallet,
     asset: &str,
@@ -51,35 +52,17 @@ pub fn execute_buy(
     let net_spend = spend_usdt - fee;
     let qty = net_spend / price.max(1e-9);
 
-    wallet.apply_buy(asset, qty, net_spend);
-    wallet.balance_atp -= spend_usdt;
-    wallet.trade_count += 1;
-
-    let record = GhostTradeLog {
-        timestamp: chrono::Utc::now().to_rfc3339(),
-        step,
-        action: "buy".to_string(),
-        asset: asset.to_string(),
-        price_usd: price,
+    let fill = GhostFill {
+        asset,
+        side: Side::Buy,
+        price,
         quantity: qty,
-        trade_value_usdt: spend_usdt,
-        realized_pnl_usdt: -fee,
-        balance_atp: wallet.balance_atp,
-        cumulative_pnl: wallet.cumulative_pnl,
-        reason: reason.to_string(),
+        fee,
+        step,
+        reason,
     };
-
-    eprintln!(
-        "[ghost BUY ] step={:>5}  asset={:<6} qty={:.4} @ ${:.4}  fee=${:.4}",
-        step, asset, qty, price, fee
-    );
-
-    if let Some(path) = log_path {
-        #[allow(
-            deprecated,
-            reason = "Legacy diagnostic output retained for compatibility"
-        )]
-        crate::log::append_ghost_log(&record, path);
+    if let Err(err) = apply_ghost_fill(wallet, fill, log_path) {
+        eprintln!("[ghost BUY rejected] {err}");
     }
 }
 
@@ -88,8 +71,8 @@ pub fn execute_buy(
 /// Sells `wallet.kelly_fraction() * balance[asset]` units (validated always-valid
 /// fraction), deducting metabolic cost.
 ///
-/// `log_path` is deprecated best-effort diagnostic output, not a reliable record.
-/// Logging failures are silently ignored; wallet changes are not rolled back.
+/// `log_path` is deprecated best-effort diagnostic output, not a reliable
+/// record. A log write failure rejects the fill before any wallet commit.
 pub fn execute_sell(
     wallet: &mut GhostWallet,
     asset: &str,
@@ -103,48 +86,19 @@ pub fn execute_sell(
         return;
     }
 
-    let entry_price = wallet.entry_price(asset);
     let proceeds = qty * price;
     let fee = proceeds * METABOLIC_COST;
-    let net_proceeds = proceeds - fee;
-    let pnl = (price - entry_price) * qty - fee;
-
-    wallet.apply_sell(asset, qty);
-    wallet.balance_atp += net_proceeds;
-    wallet.cumulative_pnl += pnl;
-    wallet.trade_count += 1;
-    if let Some(p) = wallet.realized_pnls.get_mut(asset) {
-        *p += pnl;
-    } else {
-        wallet.realized_pnls.insert(asset.to_string(), pnl);
-    }
-    wallet.record_pnl_and_update_kelly(pnl);
-
-    let record = GhostTradeLog {
-        timestamp: chrono::Utc::now().to_rfc3339(),
-        step,
-        action: "sell".to_string(),
-        asset: asset.to_string(),
-        price_usd: price,
+    let fill = GhostFill {
+        asset,
+        side: Side::Sell,
+        price,
         quantity: qty,
-        trade_value_usdt: proceeds,
-        realized_pnl_usdt: pnl,
-        balance_atp: wallet.balance_atp,
-        cumulative_pnl: wallet.cumulative_pnl,
-        reason: reason.to_string(),
+        fee,
+        step,
+        reason,
     };
-
-    eprintln!(
-        "[ghost SELL] step={:>5}  asset={:<6} qty={:.4} @ ${:.4}  PnL={:+.4}",
-        step, asset, qty, price, pnl
-    );
-
-    if let Some(path) = log_path {
-        #[allow(
-            deprecated,
-            reason = "Legacy diagnostic output retained for compatibility"
-        )]
-        crate::log::append_ghost_log(&record, path);
+    if let Err(err) = apply_ghost_fill(wallet, fill, log_path) {
+        eprintln!("[ghost SELL rejected] {err}");
     }
 }
 

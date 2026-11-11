@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 use metabolic_ledger::audit::AuditRecord;
-use metabolic_ledger::paper::LedgerSnapshot;
+use metabolic_ledger::ledger::LedgerSnapshot;
 use metabolic_ledger::parity::{ParityFixture, load_fixture, run_fixture, shipped_fixture_dir};
-use metabolic_ledger::{AcceptedFill, ApplyOutcome, LedgerError, PaperLedger, Scale};
+use metabolic_ledger::{AcceptedFill, ApplyOutcome, Ledger, LedgerError, Scale};
 use serde_json::{Value, json};
 
 fn legacy_fill() -> Value {
@@ -20,8 +20,8 @@ fn legacy_fill() -> Value {
     })
 }
 
-fn book() -> PaperLedger {
-    PaperLedger::new("ASSET_A", Scale::CENTS_WHOLE_LOTS, 100_000).unwrap()
+fn book() -> Ledger {
+    Ledger::new("ASSET_A", Scale::CENTS_WHOLE_LOTS, 100_000).unwrap()
 }
 
 #[test]

@@ -9,8 +9,9 @@ using biological energy concepts (ATP) to constrain position sizing (see `README
 `kelly_fraction()` of the available ATP; a sell sells `kelly_fraction()` of the asset balance and
 adds the proceeds back to ATP. Both deduct a metabolic cost (`METABOLIC_COST`) that models
 spread/slippage (`src/engine.rs`). A `log_path` enables deprecated, best-effort JSONL diagnostics
-(`GhostTradeLog`), not an audit record; failures are silently ignored. Use `PaperLedger` /
-`AuditRecord` for accounting and handle persistence errors separately. Trades below the minimum
+(`GhostTradeLog`), not an audit record; write errors reject the fill before commit and a failed
+write can leave a partial line. Use `Ledger` / `AuditRecord` for accounting and handle
+persistence errors separately. Trades below the minimum
 size return without trading or logging. It owns persistent ghost accounting (`GhostWallet`,
 realized PnL, win rate, Kelly fraction).
 
@@ -42,7 +43,7 @@ cargo build --all-features
 cargo test --all-features
 ```
 
-`azure-pipelines.yml` (Linux, Windows, macOS) and `docker.yml` are secondary CI.
+`azure-pipelines.yml` (Linux, Windows, macOS) is secondary CI.
 
 ## Conventions visible in the repo
 

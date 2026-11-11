@@ -4,14 +4,14 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Typed errors for the paper-accounting subset (RM-1863).
+//! Typed errors for the economic-accounting subset (RM-1863).
 //!
 //! Unsupported operations are rejected here. They are never silently coerced
 //! or clamped.
 
 use std::fmt;
 
-/// Recoverable paper-ledger failure. Failed operations do not mutate committed state.
+/// Recoverable ledger failure. Failed operations do not mutate committed state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LedgerError {
     /// Inventory would become negative (short) or a sell exceeded holdings.

@@ -1,11 +1,11 @@
-# Paper accounting contract (RM-1863)
+# Deterministic accounting contract (RM-1863)
 
 This crate now exposes two layers:
 
 | Layer | Types | Role |
 | --- | --- | --- |
-| **Economic accounting** | `PaperLedger`, `AcceptedFill` | Apply an already-decided simulated fill exactly once |
-| **ATP / Kelly policy** | `AtpPolicy`, `execute_buy` / `execute_sell`, `GhostWallet` | Experimental energy sizing. **Realized PnL on `PaperLedger` never reads this state.** |
+| **Economic accounting** | `Ledger`, `AcceptedFill` | Apply an already-decided fill exactly once |
+| **ATP / Kelly policy** | `AtpPolicy`, `execute_buy` / `execute_sell`, `GhostWallet` | Experimental energy sizing. **Realized PnL on `Ledger` never reads this state.** |
 
 Legacy `execute_buy` / `execute_sell` still size from ATP × Kelly and write `f32` ghost logs. They are not the parity path. Do not treat `METABOLIC_COST` as an exchange fee.
 
@@ -13,40 +13,49 @@ Legacy `execute_buy` / `execute_sell` still size from ATP × Kelly and write `f3
 
 `log::append_ghost_log` and the legacy engine's `log_path` output are deprecated
 as an accounting record. `GhostTradeLog` is best-effort diagnostic data only,
-not a reliable ledger or audit trail. Serialization, directory creation, file
-opening, and write failures are silently ignored. Returning `()` does not
-confirm a write; records may be missing or partially written. Logging failure
-does not stop or roll back a legacy trade. Do not reconstruct authoritative
-balances, PnL, or win rates from this stream.
+not a reliable ledger or audit trail. `append_ghost_log` returns
+`std::io::Result<()>`; `apply_ghost_fill` propagates failures as
+`GhostFillError::Log` before wallet commit, and `execute_buy` / `execute_sell`
+reject the fill on error. A failed write can still leave a partial JSONL line.
+Do not reconstruct authoritative balances, PnL, or win rates from this stream.
 
-Use `PaperLedger` and its `AuditRecord` rows for economic accounting. These rows
+Use `Ledger` and its `AuditRecord` rows for economic accounting. These rows
 are held in memory, not automatically persisted: the consuming application must
 persist them and handle storage errors explicitly. Deprecating the ghost log
-does not give the paper path a disk-durability guarantee.
+does not give the ledger path a disk-durability guarantee.
+
+The legacy multi-asset wallet also exposes `apply_ghost_fill(GhostFill)`, a
+quantity-taking compatibility bridge. It applies caller-supplied quantity and
+non-negative quote-unit friction without ATP/Kelly resizing. Buy friction enters
+weighted cost basis and is realized on partial/full sales, including in adaptive
+Kelly statistics. Buy audit rows have zero realized PnL. It returns the actual
+`GhostTradeLog` or `GhostFillError`, including log I/O failures before wallet
+commit. A failed write may leave a partial JSONL line. This `f32` bridge is not
+the deterministic integer parity contract below; the v1 fixtures are unchanged.
 
 ## Supported subset (M2)
 
-- **One instrument** per `PaperLedger`. A different symbol is `instrument_mismatch`.
+- **One instrument** per `Ledger`. A different symbol is `instrument_mismatch`.
 - **Long or flat only.** `inventory_lots >= 0`. Buys open or add. Sells reduce or close.
 - **Sells may not exceed inventory.** That case is `unsupported_short` (same error as a sell from flat). Nothing is clamped to flatten.
 - **No shorts and no multi-instrument books.** A short or oversell is `unsupported_short`. A fill or non-fill for any symbol other than the configured one is `instrument_mismatch`. There is no separate multi-instrument error.
 - **No derivatives.** They cannot be expressed: `AcceptedFill` has no contract type, leverage, margin, expiry, or funding field, so there is nothing to reject at runtime. Every fill is treated as a spot fill of the configured instrument.
 - `unsupported_subset` (`LedgerError::UnsupportedSubset`) is a reserved error type. No code path returns it at this revision. It stays in the enum and in the `type_name()` contract so a later schema can use it without renaming.
-- **Paper only.** No venue, credentials, or network I/O.
+- **Accounting only.** No venue, credentials, or network I/O. Callers supply accepted fills; their execution mode is outside this crate.
 
 Anything outside the subset is rejected. Failed calls leave cash, inventory, cost, realized PnL, and previously committed audit rows unchanged.
 
 ## Units
 
-Integer only. No `f32`/`f64` on the paper path.
+Integer only. No `f32`/`f64` on the accounting path.
 
 | Quantity | Type | Meaning |
 | --- | --- | --- |
 | `price_ticks` | `i64` | Price in ticks. `price_scale` ticks = 1 quote unit. |
 | `qty_lots` | `i64` | Size in lots. `qty_scale` lots = 1 asset unit. |
-| quote subunits | `i64` | Cash, fees, cost, realized / unrealized PnL. |
+| quote subunits | `i64` | Cash, fees, cost, realized / unrealized PnL. `price_scale` subunits = 1 quote unit. |
 
-Shipped fixtures use `price_scale = 100` (cents) and `qty_scale = 1` (whole lots).
+Whole-lot fixtures use `price_scale = 100` (cents) and `qty_scale = 1` (whole lots). For fractional quantities, see the recipe below.
 
 Notional:
 
@@ -54,7 +63,7 @@ Notional:
 notional_subunits = (price_ticks * qty_lots) / qty_scale
 ```
 
-The product must be divisible by `qty_scale` and must fit in `i64`. Otherwise the fill is rejected before mutation.
+The product is computed in `i128`, must be divisible by `qty_scale`, and the resulting notional must fit in `i64`. Otherwise the fill is rejected before mutation.
 
 Sign rules:
 
@@ -63,6 +72,55 @@ Sign rules:
 - `fee_subunits > 0` is a commission (paid once).
 - `fee_subunits < 0` is a rebate (credited once). Rebate size is not capped at the notional.
 - A buy rebate larger than the notional makes `notional + fee` negative, so cash **increases** and `total_cost_subunits` can go negative. That is allowed. The fill is rejected only when the integer add or subtract overflows `i64`.
+
+### Fractional-asset recipe: cent prices and 1e-8 BTC lots
+
+`price_scale` sets both the price representation and the quote-money subunit; it need not equal the market's price-tick count per dollar. To support **every** cent-priced fill down to one satoshi (`0.00000001 BTC`), use:
+
+```rust
+use metabolic_ledger::Scale;
+
+let scale = Scale {
+    price_scale: 10_000_000_000,
+    qty_scale: 100_000_000,
+};
+```
+
+1. Set `qty_scale = 100_000_000`: one `qty_lots` is one satoshi.
+2. A cent times one satoshi is `0.0000000001 USD` (`1e-10 USD`). Choose that as the quote subunit, so `price_scale = 100 * qty_scale = 10_000_000_000`.
+3. Encode a price quoted in integer cents as `price_ticks = price_in_cents * 100_000_000`. Encode quantities as integer satoshis, without rounding. Use exact decimal/integer conversion, not floating point.
+4. Encode **all** cash, fees/rebates, cost and PnL in the same `1e-10 USD` subunits: `1 USD = 10_000_000_000` subunits and `1 cent = 100_000_000` subunits. Encode external marks exactly like fill prices. Do not leave cash or fees in cents when switching scales.
+
+For integer cent price `c` and integer satoshi quantity `q`, the notional is `(c * 100_000_000 * q) / 100_000_000 = c * q` subunits. Thus division is exact even for a single satoshi. Merely setting `price_scale = 100` and `qty_scale = 100_000_000` is insufficient: at `$60,000.01`, one satoshi would require `6_000_001 / 100_000_000` cents, which is not an integer. Some larger fills happen to divide exactly at that coarser scale; that does not make it safe for all fractional fills.
+
+If `Scale::notional_subunits` still rejects:
+
+- `malformed_input` with a divisibility reason means the encoded price × quantity needs a fraction of the configured quote subunit. Check the conversions and choose a sufficiently fine quote scale for the actual price/quantity granularity. Do not round the notional or resize the accepted fill to suppress the error. Nonpositive scales, prices or quantities are also `malformed_input`.
+- `out_of_range` means the exact notional cannot fit in `i64`. Finer scales trade range for precision: at this scale, positive cash/notionals top out at about `$922 million`. Check price/quantity conversions, balances, fees, accumulated costs and derived cost-basis values against their `i64` bounds too.
+
+Changing only `price_scale` metadata does not rescale stored integers; configure the scale and convert all inputs consistently before creating the ledger. A rejected fill leaves state and audit unchanged. Mark valuation uses the same exact-notional check and may fail without changing the ledger.
+
+#### Hand-verified fractional fixture
+
+[`fixtures/v1/fractional_btc_buy.json`](../fixtures/v1/fractional_btc_buy.json) starts flat with `$1`, buys **one satoshi** at `$60,000.01`, pays a `$0.000001` fee, and marks at `$60,001.01`. The following calculations are by hand, not generated by ledger replay:
+
+| Input | Encoded integer |
+| --- | --- |
+| Starting cash (`1 * 10_000_000_000`) | `10_000_000_000` |
+| Buy price (`6_000_001 cents * 100_000_000`) | `600_000_100_000_000` |
+| Quantity (`0.00000001 * 100_000_000`) | `1` |
+| Fee (`0.000001 * 10_000_000_000`) | `10_000` |
+| Mark (`6_000_101 cents * 100_000_000`) | `600_010_100_000_000` |
+
+- Notional: `600_000_100_000_000 * 1 / 100_000_000 = 6_000_001` subunits (`$0.0006000001`).
+- Debit / total cost: `6_000_001 + 10_000 = 6_010_001`.
+- Cash: `10_000_000_000 - 6_010_001 = 9_993_989_999`; inventory: `1` lot.
+- Weighted cost basis: `floor(6_010_001 * 100_000_000 / 1) = 601_000_100_000_000` ticks per BTC.
+- Realized PnL: `0` (no sell); accumulated fees: `10_000`.
+- Mark value: `600_010_100_000_000 * 1 / 100_000_000 = 6_000_101`; unrealized PnL: `6_000_101 - 6_010_001 = -9_900`.
+- The single audit row copies the fill's timestamp (`1`), ID (`btc-f1`), instrument (`BTC`), side (`buy`), price, quantity and fee. It has `cash_after = 9_993_989_999`, `inventory_after = 1`, `total_cost_after = 6_010_001`, `realized_pnl_delta = 0` and `idempotent_replay = false`. `order_id` and `reason` are `null`; `decision_id` is absent.
+
+Replay this file with `load_fixture` + `run_fixture`, or run `cargo test --all-features --test parity_harness all_shipped_v1_fixtures_reconcile` to check it alongside every existing v1 fixture with zero tolerance.
 
 ## Cost basis and realized PnL
 
@@ -80,9 +138,9 @@ floor((total_cost_subunits * qty_scale) / inventory_lots)
 
 when long, else `0`. Floor is Euclidean, so a negative cost from a large buy rebate rounds down. With `qty_scale = 1` this is `floor(total_cost / inventory)`. Fixtures that need an exact basis should assert `total_cost_subunits` as well.
 
-The product is computed in `i128`. If the floored result does not fit in `i64`, `PaperLedger::checked_weighted_cost_basis_ticks()` returns `out_of_range`. It never saturates to `i64::MIN` / `i64::MAX`. `snapshot`, `snapshot_json`, and the parity harness use the checked value, so an unrepresentable basis fails the snapshot (and the fixture) instead of comparing a clamped number. Ledger state is not changed by this failure; the fill that produced the cost has already been committed under the normal checked arithmetic.
+The product is computed in `i128`. If the floored result does not fit in `i64`, `Ledger::checked_weighted_cost_basis_ticks()` returns `out_of_range`. It never saturates to `i64::MIN` / `i64::MAX`. `snapshot`, `snapshot_json`, and the parity harness use the checked value, so an unrepresentable basis fails the snapshot (and the fixture) instead of comparing a clamped number. Ledger state is not changed by this failure; the fill that produced the cost has already been committed under the normal checked arithmetic.
 
-`AtpPolicy::energy_commitment` is the fraction used by `propose_buy_spend` and `propose_sell_qty`. Those helpers do not read the wallet Kelly fraction, and `PaperLedger` does not apply them.
+`AtpPolicy::energy_commitment` is the fraction used by `propose_buy_spend` and `propose_sell_qty`. Those helpers do not read the wallet Kelly fraction, and `Ledger` does not apply them.
 
 Unrealized / mark-to-market is **not** ledger state. Callers pass an external `mark_price_ticks`:
 
@@ -101,13 +159,42 @@ unrealized = notional(mark, inventory) - total_cost
 - Same `fill_id` + same payload → `ApplyOutcome::IdempotentReplay` (no second debit; an audit row with `idempotent_replay = true`).
 - Same `fill_id` + different payload → `duplicate_fill_conflict`.
 
+## Restart and restore (RM-2471)
+
+Persist the complete `LedgerSnapshot` returned by `Ledger::snapshot` (or the
+JSON from `snapshot_json`). Deserialize JSON as `ledger::LedgerSnapshot` and pass
+it to `Ledger::from_snapshot`, which takes the snapshot by value: it is
+consumed whether the restore succeeds or fails, so keep your own copy if you
+need it afterwards. No snapshot fields or parity-v1 formats change;
+existing snapshots with their complete audit are supported.
+
+Restore replays the audit in its original order to rebuild the book and the
+applied-fill fingerprint index, including optional order/decision identities and
+event times. It verifies every audit row and the final economic fields. Empty
+books and non-fill-only histories are supported. Missing required row fields,
+inconsistent rows, conflicting identities, invalid fills, or an economic state
+that does not match the history return a typed `LedgerError`; no partial ledger
+is returned. Persist the snapshot atomically and keep its **entire, unmodified
+audit**. This is not a compacted-history or tamper-proof storage format.
+
+After restore, an already-applied identical fill returns `IdempotentReplay` and
+does not change cash, inventory, total cost, realized PnL, or fees. As before a
+restart, it appends **one** replay audit row with zero realized-PnL delta;
+restoration itself preserves the original audit exactly and adds no rows.
+A changed payload for an existing `fill_id` is `duplicate_fill_conflict` without
+mutation. A new fill applies normally, even when it shares an order identity
+with an earlier partial fill. Protection is keyed by `fill_id`, not `order_id`.
+
+`unrealized_pnl_subunits` is an external mark-derived observation and is not
+restored as state. Supply a mark again when taking a new snapshot.
+
 ## Non-fills
 
 `reject`, `cancel`, and `non_fill` append audit rows with `realized_pnl_delta = 0`. They do not change cash, inventory, cost, or fees.
 
 ## ATP separation
 
-`AtpPolicy::propose_buy_spend` and `propose_sell_qty` size from `energy_commitment` and the balances the caller passes. `PaperLedger::apply_fill` takes the accepted quantity as given and has no `GhostWallet` / ATP field. Changing ATP or `energy_commitment` after a fill cannot change committed realized PnL.
+`AtpPolicy::propose_buy_spend` and `propose_sell_qty` size from `energy_commitment` and the balances the caller passes. `Ledger::apply_fill` takes the accepted quantity as given and has no `GhostWallet` / ATP field. Changing ATP or `energy_commitment` after a fill cannot change committed realized PnL.
 
 ## Golden fixtures
 

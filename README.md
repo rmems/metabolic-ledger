@@ -17,23 +17,27 @@ available ATP, with a metabolic cost modelling spread/slippage. Legacy trades ca
 optionally emit deprecated, best-effort JSONL diagnostics for research. This
 output is not a reliable accounting or audit record.
 
-## Paper accounting (RM-1863)
+## Deterministic accounting (RM-1863)
 
-Exact-fill economic accounting is **`PaperLedger`**, not `execute_buy` / `execute_sell`.
+Exact-fill economic accounting is **`Ledger`**, not `execute_buy` / `execute_sell`.
+
+Import it as `metabolic_ledger::Ledger` or `metabolic_ledger::ledger::Ledger`.
+See [the 0.2.0 migration notes](CHANGELOG.md) for the breaking API rename.
 
 - Supported subset: **one instrument**, **long or flat** (`inventory >= 0`). Buys add; sells reduce or close and must not exceed holdings. Shorts and oversells are `UnsupportedShort`; a second instrument is `InstrumentMismatch`. Derivatives are not expressible (fills carry no contract, leverage, or funding fields). Nothing is clamped. `UnsupportedSubset` is reserved and not returned today.
 - Units: integer ticks / lots / quote subunits (`Scale`). Shipped fixtures use `price_scale = 100`, `qty_scale = 1`. Realized PnL is integer; no float drift.
 - Fees and accepted size are applied **once**. Duplicate `fill_id` is idempotent (or a conflict if the payload differs).
-- ATP / Kelly (`AtpPolicy`, `GhostWallet`, `execute_*`) is policy only. `PaperLedger` does not read it.
+- ATP / Kelly (`AtpPolicy`, `GhostWallet`, `execute_*`) is policy only. `Ledger` does not read it.
 - Golden fixtures: `fixtures/v1/*.json`, schema `metabolic-ledger.parity.v1`. Shipped v1 files are immutable; additional v1 files (e.g. DendriteTrader.jl RM-1864 emissions) are allowed only if they keep v1 semantics, and semantic changes need a new schema version and directory. Offline only.
 
 See [`docs/accounting-contract.md`](docs/accounting-contract.md).
 
 ## Features
 
-- `PaperLedger` / `AcceptedFill` — deterministic integer fill application (long/flat, single name)
+- `Ledger` / `AcceptedFill` — deterministic integer fill application (long/flat, single name)
 - `GhostWallet` — dynamic multi-asset portfolio with weighted-average cost basis per asset
 - `execute_buy` / `execute_sell` — ATP-gated order execution with metabolic cost (legacy policy path)
+- `apply_ghost_fill` / `GhostFill` — caller-sized multi-asset `f32` ghost fills, with explicit quote-unit friction and a `Result<GhostTradeLog, GhostFillError>`. No second Kelly sizing. Invalid fills, insufficient funds/holdings, and JSONL write errors leave the wallet unchanged. Buy friction enters cost basis and is realized on sale, including in win-rate/Kelly statistics. This is a compatibility bridge, not the integer parity API.
 - `CELLULAR_ATP = 500.0` — initial energy budget (quote-unit equivalent)
 - `ENERGY_COMMITMENT = 0.08` — 8% of available energy per signal
 - `METABOLIC_COST = 0.001` — 0.1% friction per action
@@ -57,7 +61,7 @@ Recommended for reproducibility:
 
 ```toml
 # Pin to a release tag
-metabolic-ledger = { git = "https://github.com/rmems/metabolic-ledger", tag = "v0.1.0" }
+metabolic-ledger = { git = "https://github.com/rmems/metabolic-ledger", tag = "v0.2.0" }
 
 # Or pin to an exact commit
 metabolic-ledger = { git = "https://github.com/rmems/metabolic-ledger", rev = "<commit-sha>" }
@@ -102,7 +106,7 @@ for (asset, pnl) in &s.realized_pnl_per_asset {
 }
 ```
 
-> **Accounting note:** `total_realized_pnl` equals the sum of `realized_pnl_per_asset`. Do not reconstruct authoritative totals from `GhostTradeLog`: its deprecated writer silently ignores failures, so rows may be missing or partial.
+> **Accounting note:** `total_realized_pnl` equals the sum of `realized_pnl_per_asset`. Do not reconstruct authoritative totals from `GhostTradeLog`: its deprecated writer is best-effort and can leave partial lines.
 
 ### Deserialize a saved `PortfolioSummary`
 
@@ -121,14 +125,21 @@ let summary: metabolic_ledger::PortfolioSummary = serde_json::from_str(json).unw
 ## Legacy JSONL diagnostics (deprecated)
 
 `log::append_ghost_log` and the engine's `log_path` output are best-effort
-diagnostics only. Serialization and filesystem failures are silently ignored,
-and trades are not rolled back. Use `PaperLedger` / `AuditRecord` for accounting;
-the consuming application must persist those in-memory rows and handle storage
-errors. See the [accounting contract](docs/accounting-contract.md#deprecated-ghost-log-rm-2472).
+diagnostics only, not an audit record. Write errors are returned and reject the
+fill before wallet commit, but a failed write can still leave a partial line.
+Use `Ledger` / `AuditRecord` for accounting; the consuming application must
+persist those in-memory rows and handle storage errors. See the [accounting contract](docs/accounting-contract.md#deprecated-ghost-log-rm-2472).
+
+`append_ghost_log` returns `std::io::Result<()>`. `apply_ghost_fill` propagates
+write errors before committing wallet state (a failed write may leave a partial
+log line). The legacy void `execute_*` wrappers retain their minimum-size no-ops
+and print rejected-fill errors; use `apply_ghost_fill` for programmatic outcomes.
+Buy log rows now report zero realized PnL; buy friction is included in sell PnL
+via cost basis, so summing log rows does not charge it twice.
 
 ```rust
 execute_buy(&mut wallet, "ASSET_A", 65.0, 1, "snn_fire", Some("trades.jsonl"));
-// Attempts a diagnostic append; returning does not confirm a write.
+// Attempts a diagnostic append; a write failure rejects the fill before commit.
 ```
 
 ## Energy Model
@@ -160,7 +171,7 @@ Enable via feature flag (uses the official `sentry` Rust crate):
 [dependencies]
 metabolic-ledger = { git = "...", features = ["sentry"] }
 # or from crates.io once published
-# metabolic-ledger = { version = "0.1", features = ["sentry"] }
+# metabolic-ledger = { version = "0.2", features = ["sentry"] }
 ```
 
 In your application entrypoint (binary), initialize Sentry **once**:

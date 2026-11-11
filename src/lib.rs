@@ -15,13 +15,14 @@
 //! - **Metabolic cost** (0.1% per action) — friction / spread simulation
 //!
 //! Legacy trades can optionally emit deprecated, best-effort JSONL diagnostics.
-//! Logging failures are silently ignored; this output is not an audit record.
-//! Use [`paper::PaperLedger`] / [`audit::AuditRecord`] for accounting and handle
+//! Write errors are returned and reject the fill before commit, but a failed
+//! write can still leave a partial line; this output is not an audit record.
+//! Use [`ledger::Ledger`] / [`audit::AuditRecord`] for accounting and handle
 //! persistence errors in the consuming application.
 //!
-//! ## Paper accounting (RM-1863)
+//! ## Deterministic accounting (RM-1863)
 //!
-//! [`paper::PaperLedger`] applies an already-decided fill exactly once on a
+//! [`ledger::Ledger`] applies an already-decided fill exactly once on a
 //! **single-instrument long/flat** book. Units, fees, and the Julia fixture
 //! contract are documented in `docs/accounting-contract.md`.
 //! ATP/Kelly live in [`policy`] and the legacy [`engine`] helpers; realized
@@ -46,28 +47,31 @@
 //! - Alberts, B. et al. (2002). *Molecular Biology of the Cell* (4th ed.).
 //!   ATP as cellular energy currency — conceptual basis for CELLULAR_ATP metaphor.
 
-/// Deterministic paper-ledger audit records (injected event time).
+/// Deterministic ledger audit records (injected event time).
 pub mod audit;
 
-/// Typed paper-ledger errors (no silent coerce / clamp).
+/// Typed ledger errors (no silent coerce / clamp).
 pub mod error;
 
 /// Ghost trade execution engine with buy/sell logic and metabolic constants.
 pub mod engine;
 
-/// Legacy diagnostic data and deprecated, best-effort JSONL writer (not an audit log).
+/// Caller-sized fills for the legacy multi-asset ghost wallet.
+pub mod ghost_fill;
+
+/// Legacy diagnostic data and deprecated JSONL writer (not an audit log).
 pub mod log;
 
 /// Versioned golden-fixture schema and replay harness.
 pub mod parity;
 
-/// Exact-fill paper ledger (economic accounting; no ATP).
-pub mod paper;
+/// Exact-fill ledger (economic accounting; no ATP).
+pub mod ledger;
 
 /// ATP / Kelly sizing policy — experimental, not an accounting input.
 pub mod policy;
 
-/// Shared paper-market enums.
+/// Shared market enums.
 pub mod types;
 
 /// Integer price / quantity scales.
@@ -79,11 +83,12 @@ pub mod wallet;
 
 /// Re-export of primary engine constants and execution functions for convenience.
 pub use engine::{CELLULAR_ATP, ENERGY_COMMITMENT, METABOLIC_COST, execute_buy, execute_sell};
-/// Re-export of the paper-accounting surface used by the parity harness.
+/// Re-export of the economic-accounting surface used by the parity harness.
 pub use error::LedgerError;
+pub use ghost_fill::{GhostFill, GhostFillError, apply_ghost_fill};
+pub use ledger::{AcceptedFill, ApplyOutcome, Ledger, NonFillEvent, NonFillKind};
 /// Re-export of the trade log record type.
 pub use log::GhostTradeLog;
-pub use paper::{AcceptedFill, ApplyOutcome, NonFillEvent, NonFillKind, PaperLedger};
 pub use policy::AtpPolicy;
 pub use types::Side;
 pub use units::Scale;

@@ -4,7 +4,7 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Integer quote/quantity scales for paper accounting.
+//! Integer quote/quantity scales for economic accounting.
 //!
 //! Realized PnL is computed in integer quote subunits. There is no floating
 //! point on this path.

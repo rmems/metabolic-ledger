@@ -4,7 +4,7 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Deterministic paper-ledger audit records.
+//! Deterministic ledger audit records.
 //!
 //! Event time is injected by the caller. Wall-clock time is never written.
 
