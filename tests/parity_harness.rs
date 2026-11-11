@@ -141,7 +141,155 @@ fn realized_pnl_never_reads_atp_or_kelly() {
     assert_eq!(book.realized_pnl_subunits(), 995);
 }
 
-fn scale_of(fx: &metabolic_ledger::parity::ParityFixture) -> Scale {
+// Restore-path imports, kept here (not in the header block) so this branch
+// merges cleanly across the RM-2474 PaperLedger -> Ledger rename: the header
+// import lines are byte-identical to main.
+use metabolic_ledger::ledger::LedgerSnapshot;
+use metabolic_ledger::parity::{FixtureEvent, ParityFixture};
+use metabolic_ledger::{ApplyOutcome, NonFillEvent, NonFillKind};
+
+#[test]
+fn every_shipped_fixture_survives_snapshot_restore() {
+    for path in shipped_fixture_paths() {
+        let fx = load_fixture(&path).unwrap();
+        let (book, fills, rejected) = replay_fixture(&fx);
+
+        let json = book.snapshot_json(fx.mark_price_ticks).unwrap();
+        let snap: LedgerSnapshot = serde_json::from_str(&json).unwrap();
+        let mut restored =
+            Ledger::from_snapshot(snap).unwrap_or_else(|e| panic!("restore {}: {e}", fx.name));
+        assert_eq!(
+            restored.snapshot_json(fx.mark_price_ticks).unwrap(),
+            json,
+            "{}",
+            fx.name
+        );
+        for fill in fills {
+            assert_replays_idempotently(&mut restored, fill, &fx.name);
+        }
+        for (fill, type_name) in rejected {
+            let err = restored.apply_fill(fill).unwrap_err();
+            assert_eq!(err.type_name(), type_name, "{}", fx.name);
+        }
+    }
+}
+
+fn shipped_fixture_paths() -> Vec<std::path::PathBuf> {
+    let mut paths: Vec<_> = fs::read_dir(shipped_fixture_dir())
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
+        .collect();
+    paths.sort();
+    paths
+}
+
+enum FixtureStep {
+    Fill(AcceptedFill),
+    NonFill(NonFillEvent),
+}
+
+fn fixture_step(event: &FixtureEvent) -> FixtureStep {
+    match event {
+        FixtureEvent::Fill {
+            fill_id,
+            order_id,
+            decision_id,
+            event_time_ns,
+            instrument,
+            side,
+            price_ticks,
+            qty_lots,
+            fee_subunits,
+        } => FixtureStep::Fill(AcceptedFill {
+            fill_id: fill_id.clone(),
+            order_id: order_id.clone(),
+            decision_id: decision_id.clone(),
+            event_time_ns: *event_time_ns,
+            instrument: instrument.clone(),
+            side: *side,
+            price_ticks: *price_ticks,
+            qty_lots: *qty_lots,
+            fee_subunits: *fee_subunits,
+        }),
+        FixtureEvent::Reject { .. } => non_fill_step(NonFillKind::Reject, event),
+        FixtureEvent::Cancel { .. } => non_fill_step(NonFillKind::Cancel, event),
+        FixtureEvent::NonFill { .. } => non_fill_step(NonFillKind::NonFill, event),
+    }
+}
+
+fn non_fill_step(kind: NonFillKind, event: &FixtureEvent) -> FixtureStep {
+    let (FixtureEvent::Reject {
+        order_id,
+        event_time_ns,
+        instrument,
+        reason,
+    }
+    | FixtureEvent::Cancel {
+        order_id,
+        event_time_ns,
+        instrument,
+        reason,
+    }
+    | FixtureEvent::NonFill {
+        order_id,
+        event_time_ns,
+        instrument,
+        reason,
+    }) = event
+    else {
+        unreachable!("non_fill_step requires a non-fill event")
+    };
+    FixtureStep::NonFill(NonFillEvent {
+        event_time_ns: *event_time_ns,
+        kind,
+        order_id: order_id.clone(),
+        instrument: instrument.clone(),
+        reason: reason.clone(),
+    })
+}
+
+/// Replay fixture events, returning the book plus the fills that committed
+/// (for idempotent-replay checks) and the fills that errored (with their
+/// `type_name`, for post-restore error checks).
+fn replay_fixture(
+    fx: &ParityFixture,
+) -> (Ledger, Vec<AcceptedFill>, Vec<(AcceptedFill, &'static str)>) {
+    let mut book =
+        Ledger::new(&fx.units.instrument, scale_of(fx), fx.initial.cash_subunits).unwrap();
+    let mut fills = Vec::new();
+    let mut rejected = Vec::new();
+    for event in &fx.events {
+        match fixture_step(event) {
+            FixtureStep::Fill(fill) => match book.apply_fill(fill.clone()) {
+                Ok(_) => fills.push(fill),
+                Err(e) => rejected.push((fill, e.type_name())),
+            },
+            FixtureStep::NonFill(event) => book
+                .record_non_fill(event)
+                .unwrap_or_else(|e| panic!("{}: {e}", fx.name)),
+        }
+    }
+    (book, fills, rejected)
+}
+
+/// A fill committed before the snapshot must replay idempotently after
+/// restore: one audit row, zero economic change.
+fn assert_replays_idempotently(book: &mut Ledger, fill: AcceptedFill, name: &str) {
+    let before: LedgerSnapshot = book.snapshot(None).unwrap();
+    assert_eq!(
+        book.apply_fill(fill).unwrap(),
+        ApplyOutcome::IdempotentReplay,
+        "{name}"
+    );
+    let after = book.snapshot(None).unwrap();
+    assert_eq!(after.audit.len(), before.audit.len() + 1, "{name}");
+    let mut state = after;
+    state.audit.pop();
+    assert_eq!(state, before, "{name}");
+}
+
+fn scale_of(fx: &ParityFixture) -> Scale {
     Scale {
         price_scale: fx.units.price_scale,
         qty_scale: fx.units.qty_scale,
