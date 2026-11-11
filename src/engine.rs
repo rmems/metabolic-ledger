@@ -9,6 +9,11 @@
 //! [`execute_buy`] and [`execute_sell`] size from ATP and Kelly. They are not
 //! the exact-fill accounting API. Accepted fills go through
 //! [`crate::ledger::Ledger`], which never reads ATP.
+//!
+//! `log_path` enables only the deprecated, best-effort ghost log. Its errors
+//! are returned and reject the fill before any wallet commit, but a failed
+//! write can still leave a partial line. It is not an audit record;
+//! use `Ledger` / `AuditRecord` and handle persistence errors separately.
 
 use crate::wallet::GhostWallet;
 use crate::{GhostFill, Side, apply_ghost_fill};
@@ -27,6 +32,9 @@ pub const METABOLIC_COST: f32 = 0.001;
 /// Spends `wallet.kelly_fraction() * wallet.balance_atp` ATP (validated always-valid
 /// fraction) after deducting the metabolic cost, then updates the weighted-average
 /// cost basis.
+///
+/// `log_path` is deprecated best-effort diagnostic output, not a reliable
+/// record. A log write failure rejects the fill before any wallet commit.
 pub fn execute_buy(
     wallet: &mut GhostWallet,
     asset: &str,
@@ -62,6 +70,9 @@ pub fn execute_buy(
 ///
 /// Sells `wallet.kelly_fraction() * balance[asset]` units (validated always-valid
 /// fraction), deducting metabolic cost.
+///
+/// `log_path` is deprecated best-effort diagnostic output, not a reliable
+/// record. A log write failure rejects the fill before any wallet commit.
 pub fn execute_sell(
     wallet: &mut GhostWallet,
     asset: &str,

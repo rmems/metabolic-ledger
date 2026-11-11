@@ -8,9 +8,12 @@ Guidance for coding agents (Amp, Codex, Cursor, Claude Code, and others) working
 using biological energy concepts (ATP) to constrain position sizing (see `README.md`). A buy spends
 `kelly_fraction()` of the available ATP; a sell sells `kelly_fraction()` of the asset balance and
 adds the proceeds back to ATP. Both deduct a metabolic cost (`METABOLIC_COST`) that models
-spread/slippage (`src/engine.rs`). Executed trades are appended to JSONL (`GhostTradeLog`) for SNN
-training data when a `log_path` is passed; trades below the minimum size return without trading or
-logging. It owns persistent ghost accounting (`GhostWallet`, realized PnL, win rate, Kelly fraction).
+spread/slippage (`src/engine.rs`). A `log_path` enables deprecated, best-effort JSONL diagnostics
+(`GhostTradeLog`), not an audit record; write errors reject the fill before commit and a failed
+write can leave a partial line. Use `Ledger` / `AuditRecord` for accounting and handle
+persistence errors separately. Trades below the minimum
+size return without trading or logging. It owns persistent ghost accounting (`GhostWallet`,
+realized PnL, win rate, Kelly fraction).
 
 ## Layout
 
@@ -19,7 +22,7 @@ logging. It owns persistent ghost accounting (`GhostWallet`, realized PnL, win r
 | `src/lib.rs` | Crate root and re-exports |
 | `src/wallet.rs` | `GhostWallet`, per-asset cost basis, realized PnL, `PortfolioSummary` |
 | `src/engine.rs` | ATP-gated `execute_buy` / `execute_sell` |
-| `src/log.rs` | `GhostTradeLog` JSONL audit trail |
+| `src/log.rs` | Legacy diagnostic data and deprecated best-effort JSONL writer |
 | `docs/` | `transfer-hygiene.md`, logo |
 
 ## Toolchain

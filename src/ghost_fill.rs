@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Quantity-taking bridge for the legacy multi-asset `f32` ghost wallet.
-//! This is not the integer `PaperLedger` parity path.
+//! This is not the integer `Ledger` parity path.
 
-use crate::{GhostTradeLog, GhostWallet, Side, log::append_ghost_log};
+use crate::{GhostTradeLog, GhostWallet, Side};
 use std::{error::Error, fmt, io};
 
 /// A caller-sized simulated fill. Fee is non-negative quote-unit friction.
@@ -157,8 +157,12 @@ pub fn apply_ghost_fill(
         cumulative_pnl: next.cumulative_pnl,
         reason: reason.into(),
     };
+    #[allow(
+        deprecated,
+        reason = "Legacy diagnostic output retained for compatibility"
+    )]
     if let Some(path) = log_path {
-        append_ghost_log(&record, path).map_err(GhostFillError::Log)?;
+        crate::log::append_ghost_log(&record, path).map_err(GhostFillError::Log)?;
     }
     *wallet = next;
     Ok(record)

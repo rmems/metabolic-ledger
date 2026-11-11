@@ -81,7 +81,8 @@ pub struct PortfolioSummary {
     /// Realized PnL broken down per asset.
     pub realized_pnl_per_asset: HashMap<String, f32>,
     /// Win rate (`winning trades / total closed trades`); `None` if no closed trades.
-    /// Also computable from `GhostTradeLog` by counting positive `realized_pnl_usdt` on sell actions.
+    /// Also computable from `GhostTradeLog` sell rows, but that stream is
+    /// deprecated diagnostics, not an audit record.
     pub win_rate: Option<f64>,
     /// Total trade actions executed (buys and sells).
     pub trade_count: u64,

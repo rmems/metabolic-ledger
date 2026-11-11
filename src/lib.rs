@@ -14,7 +14,11 @@
 //! - **Energy commitment** (8% per signal) — fraction risked per trade
 //! - **Metabolic cost** (0.1% per action) — friction / spread simulation
 //!
-//! All trades are logged to JSONL for SNN training data and performance analysis.
+//! Legacy trades can optionally emit deprecated, best-effort JSONL diagnostics.
+//! Write errors are returned and reject the fill before commit, but a failed
+//! write can still leave a partial line; this output is not an audit record.
+//! Use [`ledger::Ledger`] / [`audit::AuditRecord`] for accounting and handle
+//! persistence errors in the consuming application.
 //!
 //! ## Deterministic accounting (RM-1863)
 //!
@@ -55,7 +59,7 @@ pub mod engine;
 /// Caller-sized fills for the legacy multi-asset ghost wallet.
 pub mod ghost_fill;
 
-/// Trade log record type and JSONL append helper.
+/// Legacy diagnostic data and deprecated JSONL writer (not an audit log).
 pub mod log;
 
 /// Versioned golden-fixture schema and replay harness.

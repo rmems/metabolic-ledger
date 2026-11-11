@@ -9,6 +9,21 @@ This crate now exposes two layers:
 
 Legacy `execute_buy` / `execute_sell` still size from ATP × Kelly and write `f32` ghost logs. They are not the parity path. Do not treat `METABOLIC_COST` as an exchange fee.
 
+## Deprecated ghost log (RM-2472)
+
+`log::append_ghost_log` and the legacy engine's `log_path` output are deprecated
+as an accounting record. `GhostTradeLog` is best-effort diagnostic data only,
+not a reliable ledger or audit trail. `append_ghost_log` returns
+`std::io::Result<()>`; `apply_ghost_fill` propagates failures as
+`GhostFillError::Log` before wallet commit, and `execute_buy` / `execute_sell`
+reject the fill on error. A failed write can still leave a partial JSONL line.
+Do not reconstruct authoritative balances, PnL, or win rates from this stream.
+
+Use `Ledger` and its `AuditRecord` rows for economic accounting. These rows
+are held in memory, not automatically persisted: the consuming application must
+persist them and handle storage errors explicitly. Deprecating the ghost log
+does not give the ledger path a disk-durability guarantee.
+
 The legacy multi-asset wallet also exposes `apply_ghost_fill(GhostFill)`, a
 quantity-taking compatibility bridge. It applies caller-supplied quantity and
 non-negative quote-unit friction without ATP/Kelly resizing. Buy friction enters

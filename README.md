@@ -13,8 +13,9 @@
 
 Simulates a multi-asset portfolio without real funds, using biological energy
 concepts to constrain position sizing. Each trade signal consumes a fraction of
-available ATP, with a metabolic cost modelling spread/slippage. All decisions are
-logged to JSONL for SNN training data and post-hoc analysis.
+available ATP, with a metabolic cost modelling spread/slippage. Legacy trades can
+optionally emit deprecated, best-effort JSONL diagnostics for research. This
+output is not a reliable accounting or audit record.
 
 ## Deterministic accounting (RM-1863)
 
@@ -40,12 +41,12 @@ See [`docs/accounting-contract.md`](docs/accounting-contract.md).
 - `CELLULAR_ATP = 500.0` — initial energy budget (quote-unit equivalent)
 - `ENERGY_COMMITMENT = 0.08` — 8% of available energy per signal
 - `METABOLIC_COST = 0.001` — 0.1% friction per action
-- `GhostTradeLog` — JSONL audit trail with timestamp, asset, action, price, quantity, reason, per-trade realized_pnl_usdt
+- `GhostTradeLog` — legacy diagnostic data with timestamp, asset, action, price, quantity, reason, per-trade realized_pnl_usdt; its JSONL writer is deprecated and not a reliable audit trail
 - `PortfolioSummary` / `GhostWallet::summary()` — centralized realized PnL *per asset*, total, win-rate, trade counts, **current_kelly_fraction** (always valid; for #4)
 - `GhostWallet::kelly_fraction()` — validated getter for the current Kelly fraction (enforces "always valid" per #12)
 - Per-asset realized PnL tracking in `GhostWallet.realized_pnls`
 - Kelly fraction auto-update after 10+ trades based on realized win rate
-- `win_rate()` and `summary()` for accounting (computable from trade logs too)
+- `win_rate()` and `summary()` for legacy wallet statistics (do not infer them from the deprecated ghost log)
 
 ## Review note
 This branch contains the Wallet/MarketPrices refactor to dynamic asset maps.
@@ -105,7 +106,7 @@ for (asset, pnl) in &s.realized_pnl_per_asset {
 }
 ```
 
-> **Round-trip note:** `total_realized_pnl` equals the sum of `realized_pnl_per_asset`. The same totals can be recomputed from a `GhostTradeLog` JSONL stream by summing `realized_pnl_usdt` on rows where `action == "sell"`.
+> **Accounting note:** `total_realized_pnl` equals the sum of `realized_pnl_per_asset`. Do not reconstruct authoritative totals from `GhostTradeLog`: its deprecated writer is best-effort and can leave partial lines.
 
 ### Deserialize a saved `PortfolioSummary`
 
@@ -121,7 +122,13 @@ let json = r#"{
 let summary: metabolic_ledger::PortfolioSummary = serde_json::from_str(json).unwrap();
 ```
 
-## With JSONL Audit Log
+## Legacy JSONL diagnostics (deprecated)
+
+`log::append_ghost_log` and the engine's `log_path` output are best-effort
+diagnostics only, not an audit record. Write errors are returned and reject the
+fill before wallet commit, but a failed write can still leave a partial line.
+Use `Ledger` / `AuditRecord` for accounting; the consuming application must
+persist those in-memory rows and handle storage errors. See the [accounting contract](docs/accounting-contract.md#deprecated-ghost-log-rm-2472).
 
 `append_ghost_log` returns `std::io::Result<()>`. `apply_ghost_fill` propagates
 write errors before committing wallet state (a failed write may leave a partial
@@ -132,7 +139,7 @@ via cost basis, so summing log rows does not charge it twice.
 
 ```rust
 execute_buy(&mut wallet, "ASSET_A", 65.0, 1, "snn_fire", Some("trades.jsonl"));
-// Appends: {"ts":"2024-...","asset":"ASSET_A","action":"buy","price":65.0,"quantity":...,...}
+// Attempts a diagnostic append; a write failure rejects the fill before commit.
 ```
 
 ## Energy Model
