@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write # Qlty coverage upload via OIDC
 
 env:
   CARGO_TERM_COLOR: always
@@ -37,8 +36,28 @@ jobs:
           tool: cargo-llvm-cov
       - if: matrix.os == 'ubuntu-latest'
         run: cargo llvm-cov --all-features --lcov --output-path lcov.info
-      - if: matrix.os == 'ubuntu-latest' && github.event.pull_request.head.repo.fork != true
-        uses: qltysh/qlty-action/coverage@ebcd284bf32e36a030afe15f1e136c7be08b9506 # v2
+      - if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lcov
+          path: lcov.info
+          if-no-files-found: error
+          retention-days: 1
+  coverage:
+    name: Coverage
+    needs: check
+    if: github.event.pull_request.head.repo.fork != true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Qlty coverage upload via OIDC
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: lcov
+      - uses: qltysh/qlty-action/coverage@ebcd284bf32e36a030afe15f1e136c7be08b9506 # v2
+        continue-on-error: true
         with:
           oidc: true
           files: lcov.info
