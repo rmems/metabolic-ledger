@@ -40,7 +40,7 @@ cargo build --all-features
 cargo test --all-features
 ```
 
-`azure-pipelines.yml` (Linux, Windows, macOS) and `docker.yml` are secondary CI.
+`azure-pipelines.yml` (Linux, Windows, macOS) is secondary CI.
 
 ## Conventions visible in the repo
 

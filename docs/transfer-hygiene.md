@@ -2,8 +2,7 @@
 
 The canonical repository is
 [`rmems/metabolic-ledger`](https://github.com/rmems/metabolic-ledger). Package
-metadata, installation examples, and the GitHub Container Registry workflow use
-that owner and repository name.
+metadata and installation examples use that owner and repository name.
 
 ## Transfer audit (2026-09-21)
 
@@ -33,9 +32,11 @@ hygiene is complete; local shelf graduation remains a follow-up.
 |---|---|---|
 | `Cargo.toml` `repository` | `https://github.com/rmems/metabolic-ledger` | current |
 | `README.md` git dependency examples | `rmems/metabolic-ledger` | current |
-| `.github/workflows/docker.yml` image | `ghcr.io/rmems/metabolic-ledger` | current |
-| GitHub Actions workflows | `ci.yml`, `docker.yml` both `active` | current |
+| GitHub Actions workflows | `ci.yml` `active` | current |
 | Open issues / PRs | only #22 open for this hygiene work | coherent |
+
+The `Dockerfile` and `.github/workflows/docker.yml` were later removed
+(RM-2474), so the crate no longer publishes a GHCR image.
 
 No remaining stale `Limen-Neural` **GitHub or GHCR** URLs were found in the
 tree. Every live install, package, and registry pointer uses `rmems`.
