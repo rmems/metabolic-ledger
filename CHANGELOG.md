@@ -25,8 +25,11 @@
 
 - Declare `rust-version = "1.88"` (MSRV): edition 2024 needs ≥1.85 and the
   let-chains in `src/parity.rs` raise the floor to 1.88. A dedicated `msrv` CI
-  job checks `cargo check --all-targets --all-features` on 1.88.0.
+  job runs `cargo check --all-targets --all-features` and
+  `cargo test --all-features --doc` on 1.88.0; Azure Pipelines mirrors the check.
 - README: pin a commit (`rev`) instead of the nonexistent `v0.2.0` tag, note the
   MSRV, and compile the `rust` examples as doctests via a `cfg(doctest)` include.
+  The Sentry init example uses the `metabolic_ledger::sentry` re-export and is
+  `no_run`; the JSONL `log_path` example is `no_run` too (it writes a file).
 - AGENTS.md: the layout table now covers `ledger.rs`, `policy.rs`, `fixtures/`
   and the rest of the tree.

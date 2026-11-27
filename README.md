@@ -186,12 +186,12 @@ metabolic-ledger = { git = "...", features = ["sentry"] }
 
 In your application entrypoint (binary), initialize Sentry **once**:
 
-```rust,ignore
+```rust,no_run
 #[cfg(feature = "sentry")]
-let _guard = sentry::init((
+let _guard = metabolic_ledger::sentry::init((
     "https://<YOUR_DSN>@sentry.io/<PROJECT_ID>",
-    sentry::ClientOptions {
-        release: sentry::release_name!(),
+    metabolic_ledger::sentry::ClientOptions {
+        release: metabolic_ledger::sentry::release_name!(),
         environment: Some("production".into()),
         // Add more integrations: backtraces, contexts, etc. as needed
         ..Default::default()

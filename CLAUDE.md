@@ -50,7 +50,7 @@ Run on branch `claude/reject-subset-and-saturation` (main `ddbdf76` merged) with
 | `cargo test --all-features --lib` | pass: 28 tests |
 | `cargo test --all-features --test parity_harness` | pass: 4 tests |
 
-The README `rust` code blocks are compiled as doctests via `#[cfg(doctest)] mod readme_doctests` in `src/lib.rs` (issue #52), so they cannot drift from the API. The Sentry init snippet is `ignore`d (it needs the external `sentry` crate and a DSN); the JSONL `log_path` snippet is `no_run` (it writes a file).
+The README `rust` code blocks are compiled as doctests via `#[cfg(doctest)] mod readme_doctests` in `src/lib.rs` (issue #52), so they cannot drift from the API. The Sentry init and JSONL `log_path` snippets are `no_run` (placeholder DSN; file write). The Ubuntu CI leg needs an explicit `cargo test --all-features --doc` step because `cargo llvm-cov` skips doctests.
 
 ## Architecture map
 

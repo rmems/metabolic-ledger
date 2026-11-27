@@ -41,8 +41,9 @@ realized PnL, win rate, Kelly fraction).
 - Rust `stable` (CI uses `dtolnay/rust-toolchain` stable with rustfmt, clippy); edition 2024.
 - MSRV `rust-version = "1.88"`: edition 2024 needs ≥1.85 and the let-chains in
   `src/parity.rs` raise the floor to 1.88. The `msrv` CI job runs
-  `cargo check --all-targets --all-features` on 1.88.0, so the floor covers the
-  `sentry` feature too.
+  `cargo check --all-targets --all-features` and `cargo test --all-features --doc`
+  on 1.88.0, so the floor covers the `sentry` feature too; `azure-pipelines.yml`
+  mirrors the check.
 - `Cargo.lock` is gitignored (library crate).
 - Feature `sentry` (off by default). Dev dependency `proptest` for property tests.
 - No GPU needed. Default builds need no system packages, but `--all-features` (as in CI) enables
@@ -57,6 +58,8 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo build --all-features
 cargo test --all-features
 cargo +1.88.0 check --all-targets --all-features   # msrv job
+cargo +1.88.0 test --all-features --doc            # msrv job: README doctests
+cargo test --all-features --doc                    # ubuntu leg (llvm-cov skips doctests)
 ```
 
 `azure-pipelines.yml` (Linux, Windows, macOS) is secondary CI.
