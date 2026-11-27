@@ -42,6 +42,7 @@ jobs:
   - script: |
       rustup toolchain install 1.88.0 --profile minimal
       cargo +1.88.0 check --all-targets --all-features
+      cargo +1.88.0 test --all-features --doc
     displayName: 'MSRV check (rust-version 1.88)'
 
   - script: |
