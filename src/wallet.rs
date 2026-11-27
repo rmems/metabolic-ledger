@@ -71,19 +71,20 @@ fn sanitize_kelly_fraction(f: f32) -> f32 {
 /// - Positive edge: half-Kelly clamped to
 ///   `[KELLY_OPERATIONAL_MIN, KELLY_OPERATIONAL_MAX]`; a non-finite estimate
 ///   also stands down.
-fn kelly_trade_fraction(win_count: u64, loss_count: u64, total_win: f32, total_loss: f32) -> f32 {
-    if win_count == 0 {
+fn kelly_trade_fraction(wallet: &GhostWallet) -> f32 {
+    if wallet.win_count == 0 {
         return 0.0;
     }
-    if loss_count == 0 {
+    if wallet.loss_count == 0 {
         return KELLY_OPERATIONAL_MAX as f32;
     }
-    if total_win <= total_loss {
+    if wallet.total_win <= wallet.total_loss {
         return 0.0;
     }
-    let decisive = (win_count + loss_count) as f64;
-    let win_rate = win_count as f64 / decisive;
-    let b = (total_win as f64 / win_count as f64) / (total_loss as f64 / loss_count as f64);
+    let decisive = (wallet.win_count + wallet.loss_count) as f64;
+    let win_rate = wallet.win_count as f64 / decisive;
+    let b = (wallet.total_win as f64 / wallet.win_count as f64)
+        / (wallet.total_loss as f64 / wallet.loss_count as f64);
     let full_kelly = (win_rate * b - (1.0 - win_rate)) / b;
     if full_kelly.is_finite() && full_kelly > 0.0 {
         (full_kelly * 0.5).clamp(KELLY_OPERATIONAL_MIN, KELLY_OPERATIONAL_MAX) as f32
@@ -316,12 +317,7 @@ impl GhostWallet {
             return;
         } // need minimum sample
 
-        self.trade_fraction = kelly_trade_fraction(
-            self.win_count,
-            self.loss_count,
-            self.total_win,
-            self.total_loss,
-        );
+        self.trade_fraction = kelly_trade_fraction(self);
     }
 
     /// Win rate from closed trades (returns `None` if no trades).
