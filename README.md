@@ -43,9 +43,9 @@ See [`docs/accounting-contract.md`](docs/accounting-contract.md).
 - `METABOLIC_COST = 0.001` — 0.1% friction per action
 - `GhostTradeLog` — legacy diagnostic data with timestamp, asset, action, price, quantity, reason, per-trade realized_pnl_usdt; its JSONL writer is deprecated and not a reliable audit trail
 - `PortfolioSummary` / `GhostWallet::summary()` — centralized realized PnL *per asset*, total, win-rate, trade counts, **current_kelly_fraction** (always valid; for #4)
-- `GhostWallet::kelly_fraction()` — validated getter for the current Kelly fraction (enforces "always valid" per #12)
+- `GhostWallet::kelly_fraction()` — validated getter for the current Kelly fraction (enforces "always valid" per #12: `0.0` stand-down or `[0.01, 0.25]`)
 - Per-asset realized PnL tracking in `GhostWallet.realized_pnls`
-- Kelly fraction auto-update after 10+ trades based on realized win rate
+- Kelly fraction auto-update after 10+ decisive trades based on realized win rate; stands down to `0.0` when the estimated edge is not positive — all-loss history, or `full_kelly <= 0` — so `execute_buy`/`execute_sell` size nothing; all-win history caps at `0.20` (#48)
 - `win_rate()` and `summary()` for legacy wallet statistics (do not infer them from the deprecated ghost log)
 
 ## Review note

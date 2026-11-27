@@ -33,6 +33,7 @@ fn default_kelly_fraction() -> f32 {
 }
 
 /// Kelly fraction bounds for the always-valid contract (issue #12).
+/// The valid set is `{0.0}` (stand-down, issue #48) union `[KELLY_MIN, KELLY_MAX]`.
 /// Getter `kelly_fraction()` sanitizes to ENERGY_COMMITMENT outside this (defensive).
 /// The update logic in `record_pnl_and_update_kelly` uses a tighter operational range
 /// for half-Kelly (see below) — this is intentional (wider getter = safety net for
@@ -46,9 +47,12 @@ const KELLY_MAX: f32 = 0.25;
 const KELLY_OPERATIONAL_MIN: f64 = 0.02;
 const KELLY_OPERATIONAL_MAX: f64 = 0.20;
 
-/// Sanitize a Kelly fraction to the always-valid contract (finite and within bounds).
+/// Sanitize a Kelly fraction to the always-valid contract: exactly `0.0`
+/// (stand-down, issue #48; normalized from `-0.0`) or finite within bounds.
 fn sanitize_kelly_fraction(f: f32) -> f32 {
-    if f.is_finite() && (KELLY_MIN..=KELLY_MAX).contains(&f) {
+    if f == 0.0 {
+        0.0
+    } else if f.is_finite() && (KELLY_MIN..=KELLY_MAX).contains(&f) {
         f
     } else {
         ENERGY_COMMITMENT
@@ -97,8 +101,9 @@ pub struct PortfolioSummary {
     ///
     /// **Always valid when using the provided public APIs** (new(), getter, summary(), or
     /// deserializing): sanitized to `ENERGY_COMMITMENT` if the value is non-finite or outside
-    /// [KELLY_MIN, KELLY_MAX]. Defaults to ENERGY_COMMITMENT (0.08) and is updated after
-    /// ≥10 decisive trades in `record_pnl_and_update_kelly`.
+    /// the valid set `{0.0} ∪ [KELLY_MIN, KELLY_MAX]`. Defaults to ENERGY_COMMITMENT (0.08)
+    /// and is updated after ≥10 decisive trades in `record_pnl_and_update_kelly`; `0.0`
+    /// means the wallet stood down because the estimated edge was not positive (issue #48).
     ///
     /// Deserialization and serialization both sanitize (via `deserialize_kelly_fraction` /
     /// `serialize_kelly_fraction`) for defense-in-depth. Prefer the `current_kelly_fraction()`
@@ -245,6 +250,19 @@ impl GhostWallet {
     }
 
     /// Record closed trade PnL and update Kelly fraction.
+    ///
+    /// Sizing policy (issue #48), applied once ≥10 decisive (non-zero-PnL)
+    /// trades have been recorded:
+    /// - `full_kelly <= 0` — estimated edge zero or negative → fraction `0.0`
+    ///   (stand down; `execute_buy` / `execute_sell` no-op).
+    /// - All-loss history (`avg_win ≈ 0`): no observed payoff → `0.0`.
+    /// - All-win history (`avg_loss ≈ 0`): unbounded edge → `KELLY_OPERATIONAL_MAX`.
+    /// - Positive edge → half-Kelly clamped to
+    ///   `[KELLY_OPERATIONAL_MIN, KELLY_OPERATIONAL_MAX]`.
+    ///
+    /// The stand-down is not latched: the fraction is recomputed from the
+    /// cumulative record on every decisive trade, so a later positive-edge
+    /// estimate sizes positions again.
     pub fn record_pnl_and_update_kelly(&mut self, pnl: f32) {
         self.closed_trade_count += 1;
         if pnl > 0.0 {
@@ -274,15 +292,28 @@ impl GhostWallet {
             0.0
         };
 
-        if avg_win < 1e-6 || avg_loss < 1e-6 {
+        if avg_win < 1e-6 {
+            // All-loss: no observed payoff, so the edge cannot be positive.
+            self.trade_fraction = 0.0;
+            return;
+        }
+        if avg_loss < 1e-6 {
+            // All-win: unbounded edge; cap half-Kelly at the operational ceiling.
+            self.trade_fraction = KELLY_OPERATIONAL_MAX as f32;
             return;
         }
 
         let b = avg_win / avg_loss;
         let q = 1.0 - win_rate;
         let full_kelly = (win_rate * b - q) / b;
-        // Use operational (tighter) range for computed half-Kelly; defensive [KELLY_MIN, KELLY_MAX]
-        // is used only by the kelly_fraction() getter as safety net (see consts above).
+        // Stand down unless the edge is strictly positive (non-finite included).
+        if full_kelly <= 0.0 || !full_kelly.is_finite() {
+            self.trade_fraction = 0.0;
+            return;
+        }
+        // Use operational (tighter) range for computed half-Kelly; defensive
+        // {0.0} ∪ [KELLY_MIN, KELLY_MAX] is used only by the kelly_fraction()
+        // getter as safety net (see consts above).
         let half_kelly =
             (full_kelly * 0.5).clamp(KELLY_OPERATIONAL_MIN, KELLY_OPERATIONAL_MAX) as f32;
         self.trade_fraction = half_kelly;
@@ -298,8 +329,9 @@ impl GhostWallet {
     }
 
     /// Returns the current adaptive Kelly fraction (always valid).
-    /// Sanitizes to ENERGY_COMMITMENT if trade_fraction is non-finite or outside [KELLY_MIN, KELLY_MAX].
-    /// This enforces the "always valid" contract (see issue #12).
+    /// Sanitizes to ENERGY_COMMITMENT if trade_fraction is non-finite or outside the
+    /// valid set `{0.0} ∪ [KELLY_MIN, KELLY_MAX]`; `0.0` is the stand-down state
+    /// (issue #48). This enforces the "always valid" contract (see issue #12).
     pub fn kelly_fraction(&self) -> f32 {
         sanitize_kelly_fraction(self.trade_fraction)
     }
@@ -354,6 +386,101 @@ mod tests {
             (summary.current_kelly_fraction() - ENERGY_COMMITMENT).abs() < 1e-6,
             "out-of-range kelly should sanitize"
         );
+
+        let json_zero = r#"{"total_realized_pnl":0.0,"realized_pnl_per_asset":{},"win_rate":null,"trade_count":0,"closed_trade_count":0,"current_kelly_fraction":0.0}"#;
+        let summary: PortfolioSummary = serde_json::from_str(json_zero).unwrap();
+        assert_eq!(
+            summary.current_kelly_fraction(),
+            0.0,
+            "0.0 is a valid stand-down fraction and must pass through"
+        );
+    }
+
+    #[test]
+    fn test_kelly_zero_is_valid_stand_down() {
+        // 0.0 (incl. -0.0) is inside the always-valid contract as stand-down (#48).
+        let mut wallet = GhostWallet::new();
+        wallet.trade_fraction = 0.0;
+        assert_eq!(wallet.kelly_fraction(), 0.0);
+        wallet.trade_fraction = -0.0;
+        assert_eq!(wallet.kelly_fraction(), 0.0);
+        let summary = PortfolioSummary::new(0.0, HashMap::new(), None, 0, 0, 0.0);
+        assert_eq!(summary.current_kelly_fraction(), 0.0);
+    }
+
+    #[test]
+    fn test_kelly_stands_down_all_losses() {
+        let mut wallet = GhostWallet::new();
+        for _ in 0..10 {
+            wallet.record_pnl_and_update_kelly(-5.0);
+        }
+        assert_eq!(
+            wallet.kelly_fraction(),
+            0.0,
+            "all-loss history must stand down"
+        );
+    }
+
+    #[test]
+    fn test_kelly_all_win_caps_at_operational_max() {
+        let mut wallet = GhostWallet::new();
+        for _ in 0..10 {
+            wallet.record_pnl_and_update_kelly(5.0);
+        }
+        assert_eq!(
+            wallet.kelly_fraction(),
+            KELLY_OPERATIONAL_MAX as f32,
+            "all-win history caps half-Kelly at the operational ceiling"
+        );
+    }
+
+    #[test]
+    fn test_kelly_stands_down_negative_edge() {
+        let mut wallet = GhostWallet::new();
+        // 6 small wins vs 4 larger losses: total_win 6 < total_loss 40 → edge < 0.
+        for _ in 0..6 {
+            wallet.record_pnl_and_update_kelly(1.0);
+        }
+        for _ in 0..4 {
+            wallet.record_pnl_and_update_kelly(-10.0);
+        }
+        assert_eq!(
+            wallet.kelly_fraction(),
+            0.0,
+            "negative estimated edge must stand down"
+        );
+    }
+
+    #[test]
+    fn test_kelly_stands_down_zero_edge() {
+        let mut wallet = GhostWallet::new();
+        // Equal win and loss totals → full_kelly == 0 → still no positive size.
+        for _ in 0..5 {
+            wallet.record_pnl_and_update_kelly(2.0);
+            wallet.record_pnl_and_update_kelly(-2.0);
+        }
+        assert_eq!(
+            wallet.kelly_fraction(),
+            0.0,
+            "zero estimated edge must stand down"
+        );
+    }
+
+    #[test]
+    fn test_kelly_stand_down_not_latched() {
+        let mut wallet = GhostWallet::new();
+        for _ in 0..10 {
+            wallet.record_pnl_and_update_kelly(-5.0);
+        }
+        assert_eq!(wallet.kelly_fraction(), 0.0);
+        // Enough wins to flip the cumulative edge positive again.
+        for _ in 0..10 {
+            wallet.record_pnl_and_update_kelly(100.0);
+        }
+        assert!(
+            wallet.kelly_fraction() > 0.0,
+            "a later positive-edge estimate must resume sizing"
+        );
     }
 
     proptest! {
@@ -369,15 +496,62 @@ mod tests {
                 wallet.record_pnl_and_update_kelly(*pnl);
             }
             let kelly = wallet.kelly_fraction();
-            prop_assert!((KELLY_MIN..=KELLY_MAX).contains(&kelly));
+            // Always-valid contract: 0.0 stand-down (#48) or within [KELLY_MIN, KELLY_MAX].
+            prop_assert!(kelly == 0.0 || (KELLY_MIN..=KELLY_MAX).contains(&kelly));
             // With >=10 decisive non-zero trades the operational update path is exercised.
             let decisive = wallet.win_count + wallet.loss_count;
             if decisive >= 10 {
-                prop_assert!(
-                    (KELLY_OPERATIONAL_MIN as f32..=KELLY_OPERATIONAL_MAX as f32)
-                        .contains(&kelly)
-                );
+                let win_rate = wallet.win_count as f64 / decisive as f64;
+                let avg_win = if wallet.win_count > 0 {
+                    wallet.total_win as f64 / wallet.win_count as f64
+                } else {
+                    0.0
+                };
+                let avg_loss = if wallet.loss_count > 0 {
+                    wallet.total_loss as f64 / wallet.loss_count as f64
+                } else {
+                    0.0
+                };
+                if avg_win < 1e-6 {
+                    prop_assert_eq!(kelly, 0.0);
+                } else if avg_loss < 1e-6 {
+                    prop_assert_eq!(kelly, KELLY_OPERATIONAL_MAX as f32);
+                } else {
+                    let b = avg_win / avg_loss;
+                    let full_kelly = (win_rate * b - (1.0 - win_rate)) / b;
+                    if full_kelly <= 0.0 || !full_kelly.is_finite() {
+                        prop_assert_eq!(kelly, 0.0);
+                    } else {
+                        prop_assert!(
+                            (KELLY_OPERATIONAL_MIN as f32..=KELLY_OPERATIONAL_MAX as f32)
+                                .contains(&kelly)
+                        );
+                    }
+                }
             }
+        }
+
+        #[test]
+        fn prop_kelly_stands_down_on_negative_edge(
+            wins in prop::collection::vec(1e-3f32..1_000.0f32, 0..15),
+            losses in prop::collection::vec(1e-3f32..1_000.0f32, 0..15),
+        ) {
+            prop_assume!(wins.len() + losses.len() >= 10);
+            // Strict inequality keeps the f64 Kelly estimate strictly negative too
+            // (f32 gap >> f64 rounding), so the expected outcome is unambiguous.
+            prop_assume!(wins.iter().sum::<f32>() < losses.iter().sum::<f32>());
+            let mut wallet = GhostWallet::new();
+            for pnl in &wins {
+                wallet.record_pnl_and_update_kelly(*pnl);
+            }
+            for pnl in &losses {
+                wallet.record_pnl_and_update_kelly(-*pnl);
+            }
+            prop_assert_eq!(
+                wallet.kelly_fraction(),
+                0.0,
+                "negative estimated edge must stand the wallet down"
+            );
         }
 
         #[test]
