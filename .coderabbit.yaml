@@ -12,7 +12,7 @@ reviews:
   - '!**/target/**'
   path_instructions:
   - path: '**/*.rs'
-    instructions: 'Rust edition 2024; no `rust-version`; CI uses stable on Linux, Windows and macOS. Do not suggest downgrading the edition or using std/language APIs newer than the pinned toolchain/MSRV. CI gate: `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --all-features`. Flag anything that would fail `cargo fmt --check` or clippy `-D warnings`. Keep code portable across the three CI OSes (paths, line endings, no Unix-only APIs without cfg). The `sentry` feature is optional.'
+    instructions: 'Rust edition 2024; `rust-version = "1.88"` (MSRV; let-chains in `src/parity.rs` require it). CI uses stable on Linux, Windows and macOS plus an `msrv` job on 1.88.0. Do not suggest downgrading the edition or using std/language APIs newer than 1.88. CI gate: `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --all-features`. Flag anything that would fail `cargo fmt --check` or clippy `-D warnings`. Keep code portable across the three CI OSes (paths, line endings, no Unix-only APIs without cfg). The `sentry` feature is optional.'
   - path: '**/Cargo.toml'
     instructions: Cargo manifest. Call out new dependencies and feature changes, and keep `rust-version` / `edition` consistent with CI.
   - path: .github/workflows/**

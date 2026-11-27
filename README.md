@@ -60,12 +60,19 @@ metabolic-ledger = { git = "https://github.com/rmems/metabolic-ledger" }
 Recommended for reproducibility:
 
 ```toml
-# Pin to a release tag
-metabolic-ledger = { git = "https://github.com/rmems/metabolic-ledger", tag = "v0.2.0" }
+# Pin to an exact commit (there are no release tags yet; 0.2.0 is unreleased)
+metabolic-ledger = { git = "https://github.com/rmems/metabolic-ledger", rev = "0e2ad88b63696d270230d53377dc0a7fc07b9f1b" }
 
-# Or pin to an exact commit
-metabolic-ledger = { git = "https://github.com/rmems/metabolic-ledger", rev = "<commit-sha>" }
+# Once a release tag exists, prefer it:
+# metabolic-ledger = { git = "https://github.com/rmems/metabolic-ledger", tag = "v0.2.0" }
 ```
+
+## Minimum supported Rust version (MSRV)
+
+`rust-version = "1.88"` in `Cargo.toml`. Edition 2024 needs ≥1.85, and the
+let-chains used in `src/parity.rs` raise the floor to **1.88**. The `msrv` CI
+job runs `cargo check --all-targets --all-features` on 1.88.0, so the declared
+floor covers the optional `sentry` feature too.
 
 ## Quick Start
 
@@ -137,14 +144,17 @@ and print rejected-fill errors; use `apply_ghost_fill` for programmatic outcomes
 Buy log rows now report zero realized PnL; buy friction is included in sell PnL
 via cost basis, so summing log rows does not charge it twice.
 
-```rust
+```rust,no_run
+use metabolic_ledger::{GhostWallet, execute_buy};
+
+let mut wallet = GhostWallet::new();
 execute_buy(&mut wallet, "ASSET_A", 65.0, 1, "snn_fire", Some("trades.jsonl"));
 // Attempts a diagnostic append; a write failure rejects the fill before commit.
 ```
 
 ## Energy Model
 
-```
+```text
 available_energy = wallet.balance_atp
 committed        = available_energy × ENERGY_COMMITMENT   (8%)
 units            = committed / price
@@ -176,12 +186,12 @@ metabolic-ledger = { git = "...", features = ["sentry"] }
 
 In your application entrypoint (binary), initialize Sentry **once**:
 
-```rust
+```rust,no_run
 #[cfg(feature = "sentry")]
-let _guard = sentry::init((
+let _guard = metabolic_ledger::sentry::init((
     "https://<YOUR_DSN>@sentry.io/<PROJECT_ID>",
-    sentry::ClientOptions {
-        release: sentry::release_name!(),
+    metabolic_ledger::sentry::ClientOptions {
+        release: metabolic_ledger::sentry::release_name!(),
         environment: Some("production".into()),
         // Add more integrations: backtraces, contexts, etc. as needed
         ..Default::default()

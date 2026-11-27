@@ -50,13 +50,13 @@ Run on branch `claude/reject-subset-and-saturation` (main `ddbdf76` merged) with
 | `cargo test --all-features --lib` | pass: 28 tests |
 | `cargo test --all-features --test parity_harness` | pass: 4 tests |
 
-The README code examples are not compiled as doctests (0 doctests run), so they can drift from the API.
+The README `rust` code blocks are compiled as doctests via `#[cfg(doctest)] mod readme_doctests` in `src/lib.rs` (issue #52), so they cannot drift from the API. The Sentry init and JSONL `log_path` snippets are `no_run` (placeholder DSN; file write). The Ubuntu CI leg needs an explicit `cargo test --all-features --doc` step because `cargo llvm-cov` skips doctests.
 
 ## Architecture map
 
 ```
 src/
-  lib.rs      crate docs and public re-exports
+  lib.rs      crate docs, public re-exports, README doctest include
   ledger.rs   Ledger, AcceptedFill, NonFillEvent, ApplyOutcome (economic accounting)
   units.rs    Scale; checked i64 notional/add/sub
   error.rs    LedgerError (typed, stable type_name() strings used by fixtures)
