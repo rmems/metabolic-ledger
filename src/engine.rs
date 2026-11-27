@@ -309,8 +309,11 @@ mod tests {
 
     #[test]
     fn test_stood_down_wallet_sizes_nothing() {
-        // End-to-end: 10 decisive losses stand the wallet down; execute_* no-op.
+        // End-to-end: 10 decisive losses stand the wallet down; execute_* no-op
+        // even with an open position that a sell could otherwise reduce.
         let mut wallet = GhostWallet::new();
+        wallet.balances.insert("ASSET_A".to_string(), 1_000.0);
+        wallet.entry_prices.insert("ASSET_A".to_string(), 0.02);
         for _ in 0..10 {
             wallet.record_pnl_and_update_kelly(-1.0);
         }
@@ -319,6 +322,7 @@ mod tests {
         execute_buy(&mut wallet, "ASSET_A", 1.0, 1, "test", None);
         execute_sell(&mut wallet, "ASSET_A", 1.0, 2, "test", None);
         assert_eq!(wallet.balance_atp, before);
+        assert_eq!(wallet.balance("ASSET_A"), 1_000.0);
         assert_eq!(wallet.trade_count, 0);
     }
 }
