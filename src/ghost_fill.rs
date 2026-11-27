@@ -59,23 +59,22 @@ fn rfc3339_from_event_time_ns(event_time_ns: u64) -> Option<String> {
     chrono::DateTime::from_timestamp(secs, nsecs).map(|dt| dt.to_rfc3339())
 }
 
-fn invalid_ghost_fill_inputs(wallet: &GhostWallet, fill: &GhostFill<'_>) -> bool {
-    fill.asset.is_empty()
-        || !fill.price.is_finite()
-        || fill.price <= 0.0
-        || !fill.quantity.is_finite()
-        || fill.quantity <= 0.0
-        || !fill.fee.is_finite()
-        || fill.fee < 0.0
-        || !wallet.balance_atp.is_finite()
-        || wallet.balance_atp < 0.0
-        || !wallet.balance(fill.asset).is_finite()
-        || wallet.balance(fill.asset) < 0.0
-        || wallet.trade_count == u64::MAX
+fn is_non_finite_or_negative(value: f32) -> bool {
+    !value.is_finite() || value < 0.0
 }
 
-fn invalid_notional(notional: f32, cost: f32) -> bool {
-    !notional.is_finite() || notional <= 0.0 || !cost.is_finite()
+fn is_non_finite_or_non_positive(value: f32) -> bool {
+    !value.is_finite() || value <= 0.0
+}
+
+fn invalid_ghost_fill_inputs(wallet: &GhostWallet, fill: &GhostFill<'_>) -> bool {
+    fill.asset.is_empty()
+        || wallet.trade_count == u64::MAX
+        || is_non_finite_or_non_positive(fill.price)
+        || is_non_finite_or_non_positive(fill.quantity)
+        || is_non_finite_or_negative(fill.fee)
+        || is_non_finite_or_negative(wallet.balance_atp)
+        || is_non_finite_or_negative(wallet.balance(fill.asset))
 }
 
 fn sell_counters_exhausted(wallet: &GhostWallet) -> bool {
@@ -95,20 +94,61 @@ fn invalid_projected_wallet(
     asset: &str,
     pnl: f32,
 ) -> bool {
-    !next.balance_atp.is_finite()
+    let marks = [
+        next.balance_atp,
+        next.balance(asset),
+        next.entry_price(asset),
+        pnl,
+        next.cumulative_pnl,
+        next.total_win,
+        next.total_loss,
+    ];
+    marks.iter().any(|value| !value.is_finite())
         || next.balance_atp < 0.0
         || next.balance_atp == wallet.balance_atp
-        || !next.balance(asset).is_finite()
         || next.balance(asset) == wallet.balance(asset)
-        || !next.entry_price(asset).is_finite()
-        || !pnl.is_finite()
-        || !next.cumulative_pnl.is_finite()
-        || !next.total_win.is_finite()
-        || !next.total_loss.is_finite()
         || next
             .realized_pnls
             .get(asset)
             .is_some_and(|p| !p.is_finite())
+}
+
+fn project_buy(
+    wallet: &GhostWallet,
+    fill: &GhostFill<'_>,
+    cost: f32,
+) -> Result<(GhostWallet, f32), GhostFillError> {
+    if cost > wallet.balance_atp {
+        return Err(GhostFillError::InsufficientFunds);
+    }
+    let mut next = wallet.clone();
+    next.apply_buy(fill.asset, fill.quantity, cost);
+    next.balance_atp -= cost;
+    Ok((next, 0.0))
+}
+
+fn project_sell(
+    wallet: &GhostWallet,
+    fill: &GhostFill<'_>,
+    notional: f32,
+) -> Result<(GhostWallet, f32), GhostFillError> {
+    if fill.quantity > wallet.balance(fill.asset) {
+        return Err(GhostFillError::InsufficientHoldings);
+    }
+    if sell_counters_exhausted(wallet) {
+        return Err(GhostFillError::InvalidFill);
+    }
+    let pnl = (fill.price - wallet.entry_price(fill.asset)) * fill.quantity - fill.fee;
+    let mut next = wallet.clone();
+    next.apply_sell(fill.asset, fill.quantity);
+    next.balance_atp += notional - fill.fee;
+    next.cumulative_pnl += pnl;
+    *next
+        .realized_pnls
+        .entry(fill.asset.to_string())
+        .or_default() += pnl;
+    next.record_pnl_and_update_kelly(pnl);
+    Ok((next, pnl))
 }
 
 /// Project the fill onto a cloned wallet, or return an error without
@@ -117,42 +157,17 @@ fn project_ghost_fill(
     wallet: &GhostWallet,
     fill: &GhostFill<'_>,
 ) -> Result<(GhostWallet, f32, f32), GhostFillError> {
-    if invalid_ghost_fill_inputs(wallet, fill) {
-        return Err(GhostFillError::InvalidFill);
-    }
     let notional = fill.price * fill.quantity;
     let cost = notional + fill.fee;
-    if invalid_notional(notional, cost) {
+    if invalid_ghost_fill_inputs(wallet, fill)
+        || is_non_finite_or_non_positive(notional)
+        || !cost.is_finite()
+    {
         return Err(GhostFillError::InvalidFill);
     }
-    let mut next = wallet.clone();
-    let pnl = match fill.side {
-        Side::Buy => {
-            if cost > wallet.balance_atp {
-                return Err(GhostFillError::InsufficientFunds);
-            }
-            next.apply_buy(fill.asset, fill.quantity, cost);
-            next.balance_atp -= cost;
-            0.0
-        }
-        Side::Sell => {
-            if fill.quantity > wallet.balance(fill.asset) {
-                return Err(GhostFillError::InsufficientHoldings);
-            }
-            if sell_counters_exhausted(wallet) {
-                return Err(GhostFillError::InvalidFill);
-            }
-            let pnl = (fill.price - wallet.entry_price(fill.asset)) * fill.quantity - fill.fee;
-            next.apply_sell(fill.asset, fill.quantity);
-            next.balance_atp += notional - fill.fee;
-            next.cumulative_pnl += pnl;
-            *next
-                .realized_pnls
-                .entry(fill.asset.to_string())
-                .or_default() += pnl;
-            next.record_pnl_and_update_kelly(pnl);
-            pnl
-        }
+    let (next, pnl) = match fill.side {
+        Side::Buy => project_buy(wallet, fill, cost)?,
+        Side::Sell => project_sell(wallet, fill, notional)?,
     };
     // Reject float overflow and changes too small to represent on this legacy path.
     if invalid_projected_wallet(wallet, &next, fill.asset, pnl) {

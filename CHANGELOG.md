@@ -5,9 +5,9 @@
 ### Ghost fill event time (RM-2534)
 
 - `apply_ghost_fill` now requires a caller-injected `event_time_ns: u64` (Unix
-  nanoseconds) and never reads the wall clock. Existing callers must pass a
-  timestamp; the legacy `execute_buy` / `execute_sell` path supplies
-  `Utc::now()` when the caller does not provide one.
+  nanoseconds) and never reads the wall clock. `execute_buy` and `execute_sell`
+  always inject `Utc::now()`; callers who need a specific time must call
+  `apply_ghost_fill` directly.
 
 ### Breaking API rename (RM-2474)
 
