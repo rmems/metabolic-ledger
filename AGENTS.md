@@ -31,9 +31,9 @@ realized PnL, win rate, Kelly fraction).
 | `src/engine.rs` | ATP-gated `execute_buy` / `execute_sell` (legacy policy path) |
 | `src/ghost_fill.rs` | `apply_ghost_fill` / `GhostFill` caller-sized ghost fills |
 | `src/log.rs` | `GhostTradeLog`; deprecated best-effort JSONL writer |
-| `tests/` | `parity_harness.rs`, `ghost_fills.rs`, `fill_traceability.rs` |
+| `tests/` | `parity_harness.rs`, `ghost_fills.rs`, `fill_traceability.rs`, `snn_integration.rs` |
 | `fixtures/v1/` | Golden parity fixtures (`metabolic-ledger.parity.v1`; immutable) |
-| `docs/` | `accounting-contract.md`, `transfer-hygiene.md`, logo |
+| `docs/` | `accounting-contract.md`, `integration-surface.md`, `transfer-hygiene.md`, logo |
 | `.github/workflows/` | `ci.yml` |
 
 ## Toolchain

@@ -2,6 +2,17 @@
 
 ## 0.2.0 (unreleased)
 
+### Integration surface docs (RM-2535)
+
+- `docs/integration-surface.md` documents the path from a Spikenaut-SNN /
+  Limen-Capital decision to `AcceptedFill` and the ledger audit row, the
+  `order_id` / `decision_id` contract, `GhostFill`'s lack of traceability
+  fields, `AtpPolicy`'s proposal-only role, and links to the sibling repos
+  (no live dependency). README and the accounting contract link to it.
+- `tests/snn_integration.rs` maps a synthetic SNN decision onto
+  `AcceptedFill` and asserts the committed audit row carries `decision_id`
+  and `order_id` verbatim.
+
 ### Ghost fill event time (RM-2534)
 
 - `apply_ghost_fill` now requires a caller-injected `event_time_ns: u64` (Unix

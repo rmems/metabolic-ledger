@@ -159,6 +159,8 @@ unrealized = notional(mark, inventory) - total_cost
 - Same `fill_id` + same payload → `ApplyOutcome::IdempotentReplay` (no second debit; an audit row with `idempotent_replay = true`).
 - Same `fill_id` + different payload → `duplicate_fill_conflict`.
 
+For which upstream consumers supply these identities (Limen-Capital, Spikenaut-SNN), see [`integration-surface.md`](integration-surface.md).
+
 ## Restart and restore (RM-2471)
 
 Persist the complete `LedgerSnapshot` returned by `Ledger::snapshot` (or the
