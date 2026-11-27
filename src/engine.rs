@@ -27,6 +27,16 @@ pub const ENERGY_COMMITMENT: f32 = 0.08;
 /// Metabolic cost per action — models spread + slippage (0.1%).
 pub const METABOLIC_COST: f32 = 0.001;
 
+/// Wall-clock fallback used only by the legacy execute_* policy path.
+/// [pply_ghost_fill] itself never reads the clock; pass an injected
+/// event_time_ns for reproducible traces (issue #50).
+fn wall_clock_event_time_ns() -> u64 {
+    chrono::Utc::now()
+        .timestamp_nanos_opt()
+        .and_then(|ns| u64::try_from(ns).ok())
+        .unwrap_or(0)
+}
+
 /// Execute a ghost buy order.
 ///
 /// Spends `wallet.kelly_fraction() * wallet.balance_atp` ATP (validated always-valid
@@ -65,7 +75,7 @@ pub fn execute_buy(
         step,
         reason,
     };
-    if let Err(err) = apply_ghost_fill(wallet, fill, log_path) {
+    if let Err(err) = apply_ghost_fill(wallet, fill, log_path, wall_clock_event_time_ns()) {
         eprintln!("[ghost BUY rejected] {err}");
     }
 }
@@ -105,7 +115,7 @@ pub fn execute_sell(
         step,
         reason,
     };
-    if let Err(err) = apply_ghost_fill(wallet, fill, log_path) {
+    if let Err(err) = apply_ghost_fill(wallet, fill, log_path, wall_clock_event_time_ns()) {
         eprintln!("[ghost SELL rejected] {err}");
     }
 }

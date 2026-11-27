@@ -53,10 +53,23 @@ impl Error for GhostFillError {
 /// An I/O failure may leave a partial log line, but never a committed fill.
 /// Buy friction enters weighted cost basis; sell PnL and Kelly therefore include
 /// both sides' friction. Buy rows have zero realized PnL (no double charge).
+///
+/// event_time_ns is a caller-injected Unix time in nanoseconds (same clock
+/// contract as [crate::ledger::Ledger]). This function never reads the wall
+/// clock, so equal fills with the same injected time produce equal log
+/// timestamps (issue #50).
+
+fn rfc3339_from_event_time_ns(event_time_ns: u64) -> Option<String> {
+    let secs = i64::try_from(event_time_ns / 1_000_000_000).ok()?;
+    let nsecs = (event_time_ns % 1_000_000_000) as u32;
+    chrono::DateTime::<chrono::Utc>::from_timestamp(secs, nsecs).map(|dt| dt.to_rfc3339())
+}
+
 pub fn apply_ghost_fill(
     wallet: &mut GhostWallet,
     fill: GhostFill<'_>,
     log_path: Option<&str>,
+    event_time_ns: u64,
 ) -> Result<GhostTradeLog, GhostFillError> {
     let GhostFill {
         asset,
@@ -141,7 +154,7 @@ pub fn apply_ghost_fill(
     }
     next.trade_count += 1;
     let record = GhostTradeLog {
-        timestamp: chrono::Utc::now().to_rfc3339(),
+        timestamp: rfc3339_from_event_time_ns(event_time_ns).ok_or(GhostFillError::InvalidFill)?,
         step,
         action: match side {
             Side::Buy => "buy",
