@@ -27,6 +27,22 @@ pub const ENERGY_COMMITMENT: f32 = 0.08;
 /// Metabolic cost per action — models spread + slippage (0.1%).
 pub const METABOLIC_COST: f32 = 0.001;
 
+/// Wall-clock fallback used only by the legacy `execute_*` policy path.
+///
+/// [`apply_ghost_fill`] itself never reads the clock; pass an injected
+/// `event_time_ns` for reproducible traces (issue #50).
+///
+/// If the system clock cannot be represented as a UTC Unix nanosecond
+/// timestamp (a pre-1970 clock, or a value outside `i64` nanoseconds), this
+/// fallback injects `0` so the fill can still commit. Prefer calling
+/// [`apply_ghost_fill`] with an explicit time when the timestamp matters.
+fn wall_clock_event_time_ns() -> u64 {
+    chrono::Utc::now()
+        .timestamp_nanos_opt()
+        .and_then(|ns| u64::try_from(ns).ok())
+        .unwrap_or(0)
+}
+
 /// Execute a ghost buy order.
 ///
 /// Spends `wallet.kelly_fraction() * wallet.balance_atp` ATP (validated always-valid
@@ -43,7 +59,11 @@ pub fn execute_buy(
     reason: &str,
     log_path: Option<&str>,
 ) {
-    let spend_usdt = wallet.balance_atp * wallet.kelly_fraction();
+    let fraction = wallet.kelly_fraction();
+    if fraction <= 0.0 {
+        return; // stand-down: no size when the estimated edge is not positive (#48)
+    }
+    let spend_usdt = wallet.balance_atp * fraction;
     if spend_usdt < 0.01 {
         return;
     }
@@ -61,7 +81,7 @@ pub fn execute_buy(
         step,
         reason,
     };
-    if let Err(err) = apply_ghost_fill(wallet, fill, log_path) {
+    if let Err(err) = apply_ghost_fill(wallet, fill, log_path, wall_clock_event_time_ns()) {
         eprintln!("[ghost BUY rejected] {err}");
     }
 }
@@ -81,7 +101,11 @@ pub fn execute_sell(
     reason: &str,
     log_path: Option<&str>,
 ) {
-    let qty = wallet.balance(asset) * wallet.kelly_fraction();
+    let fraction = wallet.kelly_fraction();
+    if fraction <= 0.0 {
+        return; // stand-down: no size when the estimated edge is not positive (#48)
+    }
+    let qty = wallet.balance(asset) * fraction;
     if qty < 1e-9 {
         return;
     }
@@ -97,7 +121,7 @@ pub fn execute_sell(
         step,
         reason,
     };
-    if let Err(err) = apply_ghost_fill(wallet, fill, log_path) {
+    if let Err(err) = apply_ghost_fill(wallet, fill, log_path, wall_clock_event_time_ns()) {
         eprintln!("[ghost SELL rejected] {err}");
     }
 }
@@ -273,5 +297,48 @@ mod tests {
             (before - wallet.balance_atp - expected_spend).abs() < 1e-4,
             "buy should use sanitized kelly fraction"
         );
+    }
+
+    #[test]
+    fn test_execute_buy_noops_at_zero_kelly() {
+        let mut wallet = GhostWallet::new();
+        wallet.trade_fraction = 0.0;
+        let before = wallet.balance_atp;
+        execute_buy(&mut wallet, "ASSET_A", 1.0, 1, "test", None);
+        assert_eq!(wallet.balance_atp, before, "buy must no-op at fraction 0");
+        assert_eq!(wallet.trade_count, 0);
+        assert_eq!(wallet.balance("ASSET_A"), 0.0);
+    }
+
+    #[test]
+    fn test_execute_sell_noops_at_zero_kelly() {
+        let mut wallet = GhostWallet::new();
+        wallet.balances.insert("ASSET_A".to_string(), 1_000.0);
+        wallet.entry_prices.insert("ASSET_A".to_string(), 0.02);
+        wallet.trade_fraction = 0.0;
+        let before = wallet.balance_atp;
+        execute_sell(&mut wallet, "ASSET_A", 0.05, 1, "test", None);
+        assert_eq!(wallet.balance_atp, before, "sell must no-op at fraction 0");
+        assert_eq!(wallet.trade_count, 0);
+        assert_eq!(wallet.balance("ASSET_A"), 1_000.0);
+    }
+
+    #[test]
+    fn test_stood_down_wallet_sizes_nothing() {
+        // End-to-end: 10 decisive losses stand the wallet down; execute_* no-op
+        // even with an open position that a sell could otherwise reduce.
+        let mut wallet = GhostWallet::new();
+        wallet.balances.insert("ASSET_A".to_string(), 1_000.0);
+        wallet.entry_prices.insert("ASSET_A".to_string(), 0.02);
+        for _ in 0..10 {
+            wallet.record_pnl_and_update_kelly(-1.0);
+        }
+        assert_eq!(wallet.kelly_fraction(), 0.0);
+        let before = wallet.balance_atp;
+        execute_buy(&mut wallet, "ASSET_A", 1.0, 1, "test", None);
+        execute_sell(&mut wallet, "ASSET_A", 1.0, 2, "test", None);
+        assert_eq!(wallet.balance_atp, before);
+        assert_eq!(wallet.balance("ASSET_A"), 1_000.0);
+        assert_eq!(wallet.trade_count, 0);
     }
 }

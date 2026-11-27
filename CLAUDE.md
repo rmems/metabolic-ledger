@@ -28,7 +28,7 @@ Do not break these. Each one is enforced in code or written in the contract.
    - Same `fill_id` with the same payload returns `ApplyOutcome::IdempotentReplay`. There is no second debit. The ledger appends an audit row with `idempotent_replay = true` and `realized_pnl_delta = 0`.
    - Same `fill_id` with a different payload is `DuplicateFillConflict`.
 7. **Non-fills.** `reject`, `cancel` and `non_fill` go through `record_non_fill`. They append audit rows with `realized_pnl_delta = 0` and do not touch cash, inventory, cost or fees.
-8. **Deterministic time.** `event_time_ns` is injected by the caller. The ledger and audit records never read the wall clock. Only the legacy `execute_*` path calls `Utc::now()`.
+8. **Deterministic time.** `event_time_ns` is injected by the caller. The ledger, audit records, and `apply_ghost_fill` never read the wall clock. Only the legacy `execute_*` path supplies `Utc::now()` as the injected event time when the caller does not provide one.
 9. **Golden fixtures are a cross-language contract.**
    - The fixtures are `fixtures/v1/*.json`, with schema id `metabolic-ledger.parity.v1` and `schema_version: 1` (`src/parity.rs`).
    - DendriteTrader.jl (RM-1864) is meant to emit the same JSON.
