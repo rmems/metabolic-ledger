@@ -71,7 +71,7 @@ Sign rules:
 - Sell cash change is `+(notional - fee)`.
 - `fee_subunits > 0` is a commission (paid once).
 - `fee_subunits < 0` is a rebate (credited once). Rebate size is not capped at the notional.
-- A buy rebate larger than the notional makes `notional + fee` negative, so cash **increases** and `total_cost_subunits` can go negative. That is allowed. A buy whose debit (`notional + fee`) **exceeds** `cash_subunits` is rejected as `insufficient_cash` and leaves the book unchanged (issue #49). Overflow of the integer add or subtract is still `out_of_range`.
+- A buy rebate larger than the notional makes `notional + fee` negative, so cash **increases** and `total_cost_subunits` can go negative. That is allowed. In v1, a buy whose debit (`notional + fee`) exceeds `cash_subunits` is also allowed: cash may go negative. `checked_sub` only rejects `i64` overflow (`out_of_range`). Rejecting insolvent buys would add an error type and change v1 fill semantics, which requires a new schema id and version (issue #49).
 
 ### Fractional-asset recipe: cent prices and 1e-8 BTC lots
 

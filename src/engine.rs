@@ -86,6 +86,9 @@ pub fn execute_buy(
     let fee = spend_usdt * METABOLIC_COST;
     let net_spend = spend_usdt - fee;
     let qty = net_spend / price;
+    if !qty.is_finite() || qty <= 0.0 {
+        return;
+    }
 
     let fill = GhostFill {
         asset,
@@ -359,30 +362,34 @@ mod tests {
         assert_eq!(wallet.balance("ASSET_A"), 1_000.0);
         assert_eq!(wallet.trade_count, 0);
     }
-    #[test]
-    fn test_execute_buy_rejects_non_positive_prices() {
+    fn assert_no_trade_on_non_positive_prices(
+        trade: impl Fn(&mut GhostWallet, f32),
+        starting_qty: f32,
+    ) {
         for price in [0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
             let mut wallet = GhostWallet::new();
+            if starting_qty > 0.0 {
+                wallet.balances.insert("ASSET_A".to_string(), starting_qty);
+                wallet.entry_prices.insert("ASSET_A".to_string(), 0.02);
+            }
             let before_atp = wallet.balance_atp;
-            execute_buy(&mut wallet, "ASSET_A", price, 1, "test", None);
+            trade(&mut wallet, price);
             assert_eq!(wallet.balance_atp, before_atp);
             assert_eq!(wallet.trade_count, 0);
-            assert_eq!(wallet.balance("ASSET_A"), 0.0);
+            assert_eq!(wallet.balance("ASSET_A"), starting_qty);
         }
     }
 
     #[test]
-    fn test_execute_sell_rejects_non_positive_prices() {
-        for price in [0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            let mut wallet = GhostWallet::new();
-            wallet.balances.insert("ASSET_A".to_string(), 1_000.0);
-            wallet.entry_prices.insert("ASSET_A".to_string(), 0.02);
-            let before_atp = wallet.balance_atp;
-            execute_sell(&mut wallet, "ASSET_A", price, 1, "test", None);
-            assert_eq!(wallet.balance_atp, before_atp);
-            assert_eq!(wallet.trade_count, 0);
-            assert_eq!(wallet.balance("ASSET_A"), 1_000.0);
-        }
+    fn test_execute_rejects_non_positive_prices() {
+        assert_no_trade_on_non_positive_prices(
+            |wallet, price| execute_buy(wallet, "ASSET_A", price, 1, "test", None),
+            0.0,
+        );
+        assert_no_trade_on_non_positive_prices(
+            |wallet, price| execute_sell(wallet, "ASSET_A", price, 1, "test", None),
+            1_000.0,
+        );
     }
 
     #[test]
@@ -390,11 +397,16 @@ mod tests {
         let mut wallet = GhostWallet::new();
         let price = 1e-12_f32;
         let before = wallet.balance_atp;
+        let expected_spend = before * wallet.kelly_fraction();
         execute_buy(&mut wallet, "ASSET_A", price, 1, "test", None);
         let spent = before - wallet.balance_atp;
         let qty = wallet.balance("ASSET_A");
         assert!(spent > 0.0, "buy at a tiny positive price should spend ATP");
-        let net = spent * (1.0 - METABOLIC_COST);
+        assert!(
+            (spent - expected_spend).abs() / expected_spend < 1e-5,
+            "gross spend must match the Kelly budget, got {spent} vs {expected_spend}"
+        );
+        let net = expected_spend * (1.0 - METABOLIC_COST);
         assert!(
             (qty * price - net).abs() / net < 1e-5,
             "qty * price must match net spend, not a 1e-9-clamped price"

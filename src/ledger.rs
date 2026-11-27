@@ -416,13 +416,6 @@ impl Ledger {
         match fill.side {
             Side::Buy => {
                 let debit = checked_add(notional, fill.fee_subunits, "buy debit")?;
-                if debit > self.cash_subunits {
-                    return Err(LedgerError::InsufficientCash {
-                        instrument: self.instrument.clone(),
-                        cash_subunits: self.cash_subunits,
-                        debit_subunits: debit,
-                    });
-                }
                 let cash = checked_sub(self.cash_subunits, debit, "cash")?;
                 let inventory = checked_add(self.inventory_lots, fill.qty_lots, "inventory")?;
                 let total_cost = checked_add(self.total_cost_subunits, debit, "total_cost")?;
@@ -835,16 +828,13 @@ mod tests {
     /// `qty_scale = 2`, one lot at 2 ticks (notional 1), and a fee chosen so
     /// `total_cost * 2` lies outside `i64`. Every individual fill step fits.
     fn book_with_basis_fee(fee: i64) -> Ledger {
-        // A large positive debit needs cash that covers it; a large rebate
-        // must start far below i64::MAX so the cash add does not overflow.
-        let starting_cash = if fee > 0 { i64::MAX } else { 100_000 };
         let mut book = Ledger::new(
             "ASSET_A",
             Scale {
                 price_scale: 100,
                 qty_scale: 2,
             },
-            starting_cash,
+            100_000,
         )
         .unwrap();
         book.apply_fill(buy("huge", 1, (2, 1, fee))).unwrap();
@@ -891,21 +881,13 @@ mod tests {
     }
 
     #[test]
-    fn insolvent_buy_is_rejected_and_does_not_mutate() {
+    fn v1_insolvent_buy_is_allowed_and_cash_goes_negative() {
+        // v1 cannot grow its error set without a schema bump (issue #49).
+        // Insolvent buys therefore still apply; cash may go negative.
         let mut book = ledger();
-        let err = book
-            .apply_fill(buy("insolvent", 1, (1000, 200, 0)))
-            .unwrap_err();
-        assert_eq!(err.type_name(), "insufficient_cash");
-        assert!(matches!(
-            err,
-            LedgerError::InsufficientCash {
-                cash_subunits: 100_000,
-                debit_subunits: 200_000,
-                ..
-            }
-        ));
-        assert_state(&book, (100_000, 0, 0, 0, 0));
+        book.apply_fill(buy("insolvent", 1, (1000, 200, 0)))
+            .unwrap();
+        assert_state(&book, (-100_000, 200, 200_000, 0, 0));
     }
 
     #[test]
