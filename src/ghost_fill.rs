@@ -68,13 +68,18 @@ fn is_non_finite_or_non_positive(value: f32) -> bool {
 }
 
 fn invalid_ghost_fill_inputs(wallet: &GhostWallet, fill: &GhostFill<'_>) -> bool {
-    fill.asset.is_empty()
-        || wallet.trade_count == u64::MAX
-        || is_non_finite_or_non_positive(fill.price)
-        || is_non_finite_or_non_positive(fill.quantity)
-        || is_non_finite_or_negative(fill.fee)
-        || is_non_finite_or_negative(wallet.balance_atp)
-        || is_non_finite_or_negative(wallet.balance(fill.asset))
+    if fill.asset.is_empty() || wallet.trade_count == u64::MAX {
+        return true;
+    }
+    [
+        is_non_finite_or_non_positive(fill.price),
+        is_non_finite_or_non_positive(fill.quantity),
+        is_non_finite_or_negative(fill.fee),
+        is_non_finite_or_negative(wallet.balance_atp),
+        is_non_finite_or_negative(wallet.balance(fill.asset)),
+    ]
+    .into_iter()
+    .any(|invalid| invalid)
 }
 
 fn sell_counters_exhausted(wallet: &GhostWallet) -> bool {
@@ -103,14 +108,19 @@ fn invalid_projected_wallet(
         next.total_win,
         next.total_loss,
     ];
-    marks.iter().any(|value| !value.is_finite())
-        || next.balance_atp < 0.0
+    if marks.iter().any(|value| !value.is_finite()) {
+        return true;
+    }
+    if next
+        .realized_pnls
+        .get(asset)
+        .is_some_and(|p| !p.is_finite())
+    {
+        return true;
+    }
+    next.balance_atp < 0.0
         || next.balance_atp == wallet.balance_atp
         || next.balance(asset) == wallet.balance(asset)
-        || next
-            .realized_pnls
-            .get(asset)
-            .is_some_and(|p| !p.is_finite())
 }
 
 fn project_buy(
