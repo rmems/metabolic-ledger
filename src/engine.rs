@@ -43,7 +43,11 @@ pub fn execute_buy(
     reason: &str,
     log_path: Option<&str>,
 ) {
-    let spend_usdt = wallet.balance_atp * wallet.kelly_fraction();
+    let fraction = wallet.kelly_fraction();
+    if fraction <= 0.0 {
+        return; // stand-down: no size when the estimated edge is not positive (#48)
+    }
+    let spend_usdt = wallet.balance_atp * fraction;
     if spend_usdt < 0.01 {
         return;
     }
@@ -81,7 +85,11 @@ pub fn execute_sell(
     reason: &str,
     log_path: Option<&str>,
 ) {
-    let qty = wallet.balance(asset) * wallet.kelly_fraction();
+    let fraction = wallet.kelly_fraction();
+    if fraction <= 0.0 {
+        return; // stand-down: no size when the estimated edge is not positive (#48)
+    }
+    let qty = wallet.balance(asset) * fraction;
     if qty < 1e-9 {
         return;
     }
@@ -273,5 +281,48 @@ mod tests {
             (before - wallet.balance_atp - expected_spend).abs() < 1e-4,
             "buy should use sanitized kelly fraction"
         );
+    }
+
+    #[test]
+    fn test_execute_buy_noops_at_zero_kelly() {
+        let mut wallet = GhostWallet::new();
+        wallet.trade_fraction = 0.0;
+        let before = wallet.balance_atp;
+        execute_buy(&mut wallet, "ASSET_A", 1.0, 1, "test", None);
+        assert_eq!(wallet.balance_atp, before, "buy must no-op at fraction 0");
+        assert_eq!(wallet.trade_count, 0);
+        assert_eq!(wallet.balance("ASSET_A"), 0.0);
+    }
+
+    #[test]
+    fn test_execute_sell_noops_at_zero_kelly() {
+        let mut wallet = GhostWallet::new();
+        wallet.balances.insert("ASSET_A".to_string(), 1_000.0);
+        wallet.entry_prices.insert("ASSET_A".to_string(), 0.02);
+        wallet.trade_fraction = 0.0;
+        let before = wallet.balance_atp;
+        execute_sell(&mut wallet, "ASSET_A", 0.05, 1, "test", None);
+        assert_eq!(wallet.balance_atp, before, "sell must no-op at fraction 0");
+        assert_eq!(wallet.trade_count, 0);
+        assert_eq!(wallet.balance("ASSET_A"), 1_000.0);
+    }
+
+    #[test]
+    fn test_stood_down_wallet_sizes_nothing() {
+        // End-to-end: 10 decisive losses stand the wallet down; execute_* no-op
+        // even with an open position that a sell could otherwise reduce.
+        let mut wallet = GhostWallet::new();
+        wallet.balances.insert("ASSET_A".to_string(), 1_000.0);
+        wallet.entry_prices.insert("ASSET_A".to_string(), 0.02);
+        for _ in 0..10 {
+            wallet.record_pnl_and_update_kelly(-1.0);
+        }
+        assert_eq!(wallet.kelly_fraction(), 0.0);
+        let before = wallet.balance_atp;
+        execute_buy(&mut wallet, "ASSET_A", 1.0, 1, "test", None);
+        execute_sell(&mut wallet, "ASSET_A", 1.0, 2, "test", None);
+        assert_eq!(wallet.balance_atp, before);
+        assert_eq!(wallet.balance("ASSET_A"), 1_000.0);
+        assert_eq!(wallet.trade_count, 0);
     }
 }
