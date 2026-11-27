@@ -53,7 +53,6 @@ pub const ATP_BANKROLL_FLOOR: f32 = 0.01;
 fn is_valid_trade_price(price: f32) -> bool {
     price.is_finite() && price > 0.0
 }
-}
 
 /// Execute a ghost buy order.
 ///
