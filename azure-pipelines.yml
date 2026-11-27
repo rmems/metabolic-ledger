@@ -39,11 +39,14 @@ jobs:
       cargo test --all-features
     displayName: 'Cargo checks with --all-features (all platforms)'
 
-  - script: |
-      rustup toolchain install 1.88.0 --profile minimal
-      cargo +1.88.0 check --all-targets --all-features
-      cargo +1.88.0 test --all-features --doc
+  - script: rustup toolchain install 1.88.0 --profile minimal
+    displayName: 'Install MSRV toolchain (1.88.0)'
+
+  - script: cargo +1.88.0 check --all-targets --all-features
     displayName: 'MSRV check (rust-version 1.88)'
+
+  - script: cargo +1.88.0 test --all-features --doc
+    displayName: 'MSRV doctests (rust-version 1.88)'
 
   - script: |
       echo "Azure pipeline succeeded for $(imageName). See #3 for accounting, #7 for CI."
