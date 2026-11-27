@@ -20,6 +20,12 @@ pub enum LedgerError {
         inventory_lots: i64,
         sell_lots: i64,
     },
+    /// A buy debit (notional + fee) would exceed cash. The book is unchanged.
+    InsufficientCash {
+        instrument: String,
+        cash_subunits: i64,
+        debit_subunits: i64,
+    },
     /// Event instrument does not match the single configured instrument.
     InstrumentMismatch {
         configured: String,
@@ -46,6 +52,7 @@ impl LedgerError {
     pub fn type_name(&self) -> &'static str {
         match self {
             Self::UnsupportedShort { .. } => "unsupported_short",
+            Self::InsufficientCash { .. } => "insufficient_cash",
             Self::InstrumentMismatch { .. } => "instrument_mismatch",
             Self::MalformedInput { .. } => "malformed_input",
             Self::OutOfRange { .. } => "out_of_range",
@@ -65,6 +72,14 @@ impl fmt::Display for LedgerError {
             } => write!(
                 f,
                 "unsupported short on {instrument}: sell {sell_lots} lots with inventory {inventory_lots}"
+            ),
+            Self::InsufficientCash {
+                instrument,
+                cash_subunits,
+                debit_subunits,
+            } => write!(
+                f,
+                "insufficient cash on {instrument}: debit {debit_subunits} with cash {cash_subunits}"
             ),
             Self::InstrumentMismatch {
                 configured,

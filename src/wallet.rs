@@ -17,9 +17,12 @@ pub struct MarketPrices {
 }
 
 impl MarketPrices {
-    /// Get the price for a named asset in USD, returning 0.0 if unknown.
-    pub fn get(&self, asset: &str) -> f32 {
-        *self.prices.get(asset).unwrap_or(&0.0)
+    /// Get the price for a named asset in USD.
+    ///
+    /// Returns `None` when the symbol is missing so callers cannot silently
+    /// treat an unknown mark as 0.0 and undercount portfolio value (issue #49).
+    pub fn get(&self, asset: &str) -> Option<f32> {
+        self.prices.get(asset).copied()
     }
 }
 
@@ -239,6 +242,10 @@ impl GhostWallet {
     }
 
     /// Total portfolio value in quote units at current prices.
+    ///
+    /// Holdings whose symbol is absent from `prices` contribute `0.0`. Prefer
+    /// [`MarketPrices::get`] when a missing mark must be distinguished from a
+    /// genuine zero price (issue #49).
     pub fn portfolio_value(&self, prices: &HashMap<String, f32>) -> f32 {
         let mut total = self.balance_atp;
         for (asset, qty) in &self.balances {
@@ -572,5 +579,14 @@ mod tests {
             prop_assert_eq!(summary.closed_trade_count, closed_trade_count);
             prop_assert_eq!(summary.current_kelly_fraction(), wallet.kelly_fraction());
         }
+    }
+
+    #[test]
+    fn test_market_prices_get_returns_none_for_unknown() {
+        let prices = MarketPrices {
+            prices: HashMap::from([("ASSET_A".to_string(), 12.5)]),
+        };
+        assert_eq!(prices.get("ASSET_A"), Some(12.5));
+        assert_eq!(prices.get("ASSET_B"), None);
     }
 }
