@@ -2,6 +2,13 @@
 
 ## 0.2.0 (unreleased)
 
+### Ghost fill event time (RM-2534)
+
+- `apply_ghost_fill` now requires a caller-injected `event_time_ns: u64` (Unix
+  nanoseconds) and never reads the wall clock. `execute_buy` and `execute_sell`
+  always inject `Utc::now()`; callers who need a specific time must call
+  `apply_ghost_fill` directly.
+
 ### Breaking API rename (RM-2474)
 
 - Rename `PaperLedger` to `Ledger` and `src/paper.rs` / the public `paper`
