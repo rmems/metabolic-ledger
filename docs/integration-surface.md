@@ -7,16 +7,16 @@ already-decided fill onto `AcceptedFill` and calls `Ledger::apply_fill`.
 
 ## From an SNN decision to a ledger audit row
 
-1. **Decide outside this crate.** The upstream strategy — the SNN layer,
-   [rmems/Spikenaut-SNN](https://github.com/rmems/Spikenaut-SNN) — produces
-   the trading intent, and [rmems/Limen-Capital](https://github.com/rmems/Limen-Capital)
+1. **Decide outside this crate.** Trading intent is produced upstream of this
+   crate; [rmems/Limen-Capital](https://github.com/rmems/Limen-Capital)
    orchestrates it through a risk gate that accepts or rejects the order.
    Sizing authority lives upstream (see Limen-Capital
    [ADR 0001](https://github.com/rmems/Limen-Capital/blob/main/docs/adr/0001-strategy-layer-ownership.md)).
-   "SNN decision" here means whatever trade intent the consumer maps;
-   Spikenaut-SNN's shipped model artifact currently emits machine-telemetry
-   regression channels, so the trading-decision producer is the upstream
-   stack's concern, not this crate's.
+   "SNN decision" here means whatever trade intent the consumer maps.
+   [rmems/Spikenaut-SNN](https://github.com/rmems/Spikenaut-SNN) is the intended
+   SNN strategy layer and `decision_id` source, but its shipped model artifact
+   currently emits machine-telemetry regression channels, so the
+   trading-decision producer is the upstream stack's concern, not this crate's.
 2. **Map the accepted fill.** The consumer builds
    `metabolic_ledger::AcceptedFill` from the fill event it accepted — the
    venue's execution report or the simulated paper fill: integer
@@ -91,6 +91,6 @@ experiment, not an accounting input.
 
 | Repo | Role | Integration |
 | --- | --- | --- |
-| [rmems/Spikenaut-SNN](https://github.com/rmems/Spikenaut-SNN) | SNN strategy producing decisions | `decision_id` source; no code dependency |
+| [rmems/Spikenaut-SNN](https://github.com/rmems/Spikenaut-SNN) | Intended SNN strategy layer | Intended `decision_id` source; shipped artifact is telemetry readout (see step 1); no code dependency |
 | [rmems/Limen-Capital](https://github.com/rmems/Limen-Capital) | Orchestration, risk gate, venue adapter | Target: maps decisions to `AcceptedFill` (`decision_id`, `client_order_id`) — proposed by issue 42 and ADR 0001; its paths do not carry those ids today |
 | [rmems/DendriteTrader.jl](https://github.com/rmems/DendriteTrader.jl) | Market replay and research | Offline emitter of `metabolic-ledger.parity.v1` fixtures (RM-1864); see the [golden fixtures](accounting-contract.md#golden-fixtures) contract |
