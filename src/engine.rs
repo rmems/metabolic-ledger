@@ -43,6 +43,17 @@ fn wall_clock_event_time_ns() -> u64 {
         .unwrap_or(0)
 }
 
+/// Minimum ATP spend execute_buy will size. Smaller candidate spends are a
+/// no-op so a near-empty wallet cannot open a dust position.
+/// Named ATP bankroll floor (issue #49).
+pub const ATP_BANKROLL_FLOOR: f32 = 0.01;
+
+/// Ghost-engine prices must be finite and strictly positive before sizing, so
+/// qty * price stays consistent with net spend (issue #49).
+fn is_valid_trade_price(price: f32) -> bool {
+    price.is_finite() && price > 0.0
+}
+
 /// Execute a ghost buy order.
 ///
 /// Spends `wallet.kelly_fraction() * wallet.balance_atp` ATP (validated always-valid
@@ -63,14 +74,20 @@ pub fn execute_buy(
     if fraction <= 0.0 {
         return; // stand-down: no size when the estimated edge is not positive (#48)
     }
+    if !is_valid_trade_price(price) {
+        return;
+    }
     let spend_usdt = wallet.balance_atp * fraction;
-    if spend_usdt < 0.01 {
+    if spend_usdt < ATP_BANKROLL_FLOOR {
         return;
     }
 
     let fee = spend_usdt * METABOLIC_COST;
     let net_spend = spend_usdt - fee;
-    let qty = net_spend / price.max(1e-9);
+    let qty = net_spend / price;
+    if !qty.is_finite() || qty <= 0.0 {
+        return;
+    }
 
     let fill = GhostFill {
         asset,
@@ -104,6 +121,9 @@ pub fn execute_sell(
     let fraction = wallet.kelly_fraction();
     if fraction <= 0.0 {
         return; // stand-down: no size when the estimated edge is not positive (#48)
+    }
+    if !is_valid_trade_price(price) {
+        return;
     }
     let qty = wallet.balance(asset) * fraction;
     if qty < 1e-9 {
@@ -340,5 +360,67 @@ mod tests {
         assert_eq!(wallet.balance_atp, before);
         assert_eq!(wallet.balance("ASSET_A"), 1_000.0);
         assert_eq!(wallet.trade_count, 0);
+    }
+    fn assert_no_trade_on_non_positive_prices(
+        trade: impl Fn(&mut GhostWallet, f32),
+        starting_qty: f32,
+    ) {
+        for price in [0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let mut wallet = GhostWallet::new();
+            if starting_qty > 0.0 {
+                wallet.balances.insert("ASSET_A".to_string(), starting_qty);
+                wallet.entry_prices.insert("ASSET_A".to_string(), 0.02);
+            }
+            let before_atp = wallet.balance_atp;
+            trade(&mut wallet, price);
+            assert_eq!(wallet.balance_atp, before_atp);
+            assert_eq!(wallet.trade_count, 0);
+            assert_eq!(wallet.balance("ASSET_A"), starting_qty);
+        }
+    }
+
+    #[test]
+    fn test_execute_rejects_non_positive_prices() {
+        assert_no_trade_on_non_positive_prices(
+            |wallet, price| execute_buy(wallet, "ASSET_A", price, 1, "test", None),
+            0.0,
+        );
+        assert_no_trade_on_non_positive_prices(
+            |wallet, price| execute_sell(wallet, "ASSET_A", price, 1, "test", None),
+            1_000.0,
+        );
+    }
+
+    #[test]
+    fn test_execute_buy_tiny_price_matches_net_spend() {
+        let mut wallet = GhostWallet::new();
+        let price = 1e-12_f32;
+        let before = wallet.balance_atp;
+        let expected_spend = before * wallet.kelly_fraction();
+        execute_buy(&mut wallet, "ASSET_A", price, 1, "test", None);
+        let spent = before - wallet.balance_atp;
+        let qty = wallet.balance("ASSET_A");
+        assert!(spent > 0.0, "buy at a tiny positive price should spend ATP");
+        assert!(
+            (spent - expected_spend).abs() / expected_spend < 1e-5,
+            "gross spend must match the Kelly budget, got {spent} vs {expected_spend}"
+        );
+        let net = expected_spend * (1.0 - METABOLIC_COST);
+        assert!(
+            (qty * price - net).abs() / net < 1e-5,
+            "qty * price must match net spend, not a 1e-9-clamped price"
+        );
+        assert!(qty > 1e12, "tiny price must not be clamped up to 1e-9");
+    }
+
+    #[test]
+    fn test_execute_buy_respects_atp_bankroll_floor() {
+        let mut wallet = GhostWallet::new();
+        wallet.balance_atp = ATP_BANKROLL_FLOOR / 2.0;
+        wallet.trade_fraction = ENERGY_COMMITMENT;
+        execute_buy(&mut wallet, "ASSET_A", 1.0, 1, "test", None);
+        assert_eq!(wallet.balance_atp, ATP_BANKROLL_FLOOR / 2.0);
+        assert_eq!(wallet.trade_count, 0);
+        assert_eq!(wallet.balance("ASSET_A"), 0.0);
     }
 }

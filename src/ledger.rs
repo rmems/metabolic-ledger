@@ -881,6 +881,16 @@ mod tests {
     }
 
     #[test]
+    fn v1_insolvent_buy_is_allowed_and_cash_goes_negative() {
+        // v1 cannot grow its error set without a schema bump (issue #49).
+        // Insolvent buys therefore still apply; cash may go negative.
+        let mut book = ledger();
+        book.apply_fill(buy("insolvent", 1, (1000, 200, 0)))
+            .unwrap();
+        assert_state(&book, (-100_000, 200, 200_000, 0, 0));
+    }
+
+    #[test]
     fn restored_ledger_replays_already_applied_fill() {
         let mut book = ledger();
         let mut first = buy("r1", 1, (1000, 10, 5));
