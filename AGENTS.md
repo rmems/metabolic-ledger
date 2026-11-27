@@ -19,15 +19,30 @@ realized PnL, win rate, Kelly fraction).
 
 | Path | Contents |
 |------|----------|
-| `src/lib.rs` | Crate root and re-exports |
-| `src/wallet.rs` | `GhostWallet`, per-asset cost basis, realized PnL, `PortfolioSummary` |
-| `src/engine.rs` | ATP-gated `execute_buy` / `execute_sell` |
-| `src/log.rs` | Legacy diagnostic data and deprecated best-effort JSONL writer |
-| `docs/` | `transfer-hygiene.md`, logo |
+| `src/lib.rs` | Crate root, re-exports, `readme_doctests` README include |
+| `src/ledger.rs` | `Ledger`, `AcceptedFill`, `NonFillEvent`, `ApplyOutcome` (integer accounting) |
+| `src/units.rs` | `Scale`; checked i64 notional/add/sub |
+| `src/error.rs` | `LedgerError` (stable `type_name()` strings used by fixtures) |
+| `src/audit.rs` | `AuditRecord` / `AuditKind` (caller-injected event time) |
+| `src/types.rs` | `Side` |
+| `src/parity.rs` | `metabolic-ledger.parity.v1` schema, `load_fixture`, `run_fixture` |
+| `src/policy.rs` | `AtpPolicy` (experimental sizing; not an accounting input) |
+| `src/wallet.rs` | `GhostWallet`, `MarketPrices`, per-asset cost basis, `PortfolioSummary` (f32, adaptive Kelly) |
+| `src/engine.rs` | ATP-gated `execute_buy` / `execute_sell` (legacy policy path) |
+| `src/ghost_fill.rs` | `apply_ghost_fill` / `GhostFill` caller-sized ghost fills |
+| `src/log.rs` | `GhostTradeLog`; deprecated best-effort JSONL writer |
+| `tests/` | `parity_harness.rs`, `ghost_fills.rs`, `fill_traceability.rs` |
+| `fixtures/v1/` | Golden parity fixtures (`metabolic-ledger.parity.v1`; immutable) |
+| `docs/` | `accounting-contract.md`, `transfer-hygiene.md`, logo |
+| `.github/workflows/` | `ci.yml` |
 
 ## Toolchain
 
 - Rust `stable` (CI uses `dtolnay/rust-toolchain` stable with rustfmt, clippy); edition 2024.
+- MSRV `rust-version = "1.88"`: edition 2024 needs ≥1.85 and the let-chains in
+  `src/parity.rs` raise the floor to 1.88. The `msrv` CI job runs
+  `cargo check --all-targets --all-features` on 1.88.0, so the floor covers the
+  `sentry` feature too.
 - `Cargo.lock` is gitignored (library crate).
 - Feature `sentry` (off by default). Dev dependency `proptest` for property tests.
 - No GPU needed. Default builds need no system packages, but `--all-features` (as in CI) enables
@@ -41,6 +56,7 @@ cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo build --all-features
 cargo test --all-features
+cargo +1.88.0 check --all-targets --all-features   # msrv job
 ```
 
 `azure-pipelines.yml` (Linux, Windows, macOS) is secondary CI.

@@ -20,3 +20,13 @@
 - Remove the `Dockerfile`, the `docker.yml` GitHub Actions workflow, and the
   related Docker references in agent config and docs. The crate is consumed as
   a git dependency and no longer publishes a container image.
+
+### Docs & CI (RM-2536)
+
+- Declare `rust-version = "1.88"` (MSRV): edition 2024 needs ≥1.85 and the
+  let-chains in `src/parity.rs` raise the floor to 1.88. A dedicated `msrv` CI
+  job checks `cargo check --all-targets --all-features` on 1.88.0.
+- README: pin a commit (`rev`) instead of the nonexistent `v0.2.0` tag, note the
+  MSRV, and compile the `rust` examples as doctests via a `cfg(doctest)` include.
+- AGENTS.md: the layout table now covers `ledger.rs`, `policy.rs`, `fixtures/`
+  and the rest of the tree.

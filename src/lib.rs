@@ -100,3 +100,10 @@ pub use wallet::{GhostWallet, MarketPrices, PortfolioSummary};
 /// Re-export of the `sentry` crate (when the `sentry` feature is enabled) for
 /// error monitoring, tracing, and panic integration in consuming applications.
 pub use sentry;
+
+// Compile the README's `rust` code blocks as doctests so they cannot drift
+// from the public API (issue #52).
+#[cfg(doctest)]
+mod readme_doctests {
+    #![doc = include_str!("../README.md")]
+}

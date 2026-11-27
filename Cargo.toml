@@ -2,6 +2,7 @@
 name = "metabolic-ledger"
 version = "0.2.0"
 edition = "2024"
+rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 description = "Bio-inspired simulation ledger: ATP cellular energy metaphors, adaptive Kelly energy commitment, and metabolic cost tracking for multi-asset SNN portfolios."
 repository = "https://github.com/rmems/metabolic-ledger"
