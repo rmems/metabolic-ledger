@@ -143,15 +143,38 @@ fn log_errors_are_returned_before_commit_and_success_rows_match_fills() {
 
 #[test]
 fn injected_event_time_is_reproducible() {
+    const NS: u64 = 1_700_000_000_123_456_789;
     let mut a = GhostWallet::new();
     let mut b = GhostWallet::new();
-    let first = apply(&mut a, fill(Side::Buy, 1.0, 1.0, 0.001)).unwrap();
-    let second = apply(&mut b, fill(Side::Buy, 1.0, 1.0, 0.001)).unwrap();
+    let first = apply_ghost_fill(&mut a, fill(Side::Buy, 1.0, 1.0, 0.001), None, NS).unwrap();
+    let second = apply_ghost_fill(&mut b, fill(Side::Buy, 1.0, 1.0, 0.001), None, NS).unwrap();
     assert_eq!(first.timestamp, second.timestamp);
-    assert_eq!(
-        first.timestamp,
-        chrono::DateTime::<chrono::Utc>::from_timestamp(1_700_000_000, 0)
-            .unwrap()
-            .to_rfc3339()
+    let expected = chrono::DateTime::from_timestamp(1_700_000_000, 123_456_789)
+        .unwrap()
+        .to_rfc3339();
+    assert_eq!(first.timestamp, expected);
+    assert!(
+        first.timestamp.contains("123456789"),
+        "log timestamp must keep nanosecond precision, got {}",
+        first.timestamp
     );
+}
+
+#[test]
+fn injected_event_time_formats_u64_max() {
+    let mut wallet = GhostWallet::new();
+    let record = apply_ghost_fill(
+        &mut wallet,
+        fill(Side::Buy, 1.0, 1.0, 0.001),
+        None,
+        u64::MAX,
+    )
+    .unwrap();
+    let expected = chrono::DateTime::from_timestamp(
+        (u64::MAX / 1_000_000_000) as i64,
+        (u64::MAX % 1_000_000_000) as u32,
+    )
+    .unwrap()
+    .to_rfc3339();
+    assert_eq!(record.timestamp, expected);
 }
