@@ -73,6 +73,7 @@ fixtures/v1/   hand-verified golden files (buy, partial/full close, rebate, dupl
                reject, cancel/non-fill, short rejected, instrument mismatch)
 docs/
   accounting-contract.md  authoritative accounting contract (units, sign rules, cost basis)
+  integration-surface.md  Limen-Capital / Spikenaut-SNN integration contract (RM-2535)
   transfer-hygiene.md     repo transfer audit notes
 ```
 

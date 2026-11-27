@@ -30,7 +30,11 @@ See [the 0.2.0 migration notes](CHANGELOG.md) for the breaking API rename.
 - ATP / Kelly (`AtpPolicy`, `GhostWallet`, `execute_*`) is policy only. `Ledger` does not read it.
 - Golden fixtures: `fixtures/v1/*.json`, schema `metabolic-ledger.parity.v1`. Shipped v1 files are immutable; additional v1 files (e.g. DendriteTrader.jl RM-1864 emissions) are allowed only if they keep v1 semantics, and semantic changes need a new schema version and directory. Offline only.
 
-See [`docs/accounting-contract.md`](docs/accounting-contract.md).
+See [`docs/accounting-contract.md`](docs/accounting-contract.md). For how
+upstream consumers (Limen-Capital, Spikenaut-SNN, DendriteTrader.jl) map an
+already-decided fill onto `AcceptedFill` — including `order_id` /
+`decision_id` traceability — see
+[`docs/integration-surface.md`](docs/integration-surface.md).
 
 ## Features
 
